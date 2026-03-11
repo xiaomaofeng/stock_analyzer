@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 import os
 
-# 强制设置项目根目录
-PROJECT_ROOT = Path(r"F:\Dev\FinanceReport\stock_db")
+# 动态检测项目根目录（web/app.py -> 项目根目录）
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))

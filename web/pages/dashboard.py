@@ -1,17 +1,16 @@
-"""仪表盘页面"""
+"""仪表盘页面 - 简化版"""
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from sqlalchemy import func
 
-from config import get_session_factory
+from config import get_session_factory, get_settings
 from database.models import Stock, DailyPrice, TechnicalIndicator
 
 
 def show():
     """显示仪表盘"""
-    st.title("📊 仪表盘")
+    st.title("📈 仪表盘")
     
     SessionLocal = get_session_factory()
     db = SessionLocal()
@@ -41,82 +40,56 @@ def show():
         
         st.divider()
         
-        # 最近热门股票（按换手率）
-        st.subheader("🔥 最近活跃股票")
+        # 快捷查询
+        st.subheader("🔍 快捷股票查询")
+        st.markdown("输入股票代码，快速获取数据并分析")
         
-        latest_date = db.query(func.max(DailyPrice.trade_date)).scalar()
-        if latest_date:
-            hot_stocks = db.query(
-                DailyPrice.stock_code,
-                Stock.stock_name,
-                DailyPrice.close_price,
-                DailyPrice.change_pct,
-                DailyPrice.turnover_rate
-            ).join(Stock, DailyPrice.stock_code == Stock.stock_code).filter(
-                DailyPrice.trade_date == latest_date
-            ).order_by(DailyPrice.turnover_rate.desc()).limit(10).all()
-            
-            if hot_stocks:
-                df_hot = pd.DataFrame(hot_stocks, columns=[
-                    '代码', '名称', '最新价', '涨跌幅', '换手率'
-                ])
-                df_hot['涨跌幅'] = df_hot['涨跌幅'].apply(lambda x: f"{x:+.2f}%")
-                df_hot['换手率'] = df_hot['换手率'].apply(lambda x: f"{x:.2f}%")
-                st.dataframe(df_hot, use_container_width=True)
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            quick_code = st.text_input("股票代码", placeholder="如: 159892, 000001, 600519", key="quick_search")
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("查询", use_container_width=True) and quick_code:
+                st.session_state['search_code'] = quick_code
+                st.switch_page("pages/stock_query.py")
         
-        # 市场概览
-        st.subheader("📈 市场概览")
+        st.divider()
         
-        # 涨跌分布
-        if latest_date:
-            distribution = db.query(
-                func.case(
-                    (DailyPrice.change_pct > 7, '涨停 (>7%)'),
-                    (DailyPrice.change_pct > 3, '大涨 (3-7%)'),
-                    (DailyPrice.change_pct > 0, '上涨 (0-3%)'),
-                    (DailyPrice.change_pct == 0, '平盘'),
-                    (DailyPrice.change_pct > -3, '下跌 (-3-0%)'),
-                    (DailyPrice.change_pct > -7, '大跌 (-7--3%)'),
-                    else_='跌停 (<-7%)'
-                ).label('range'),
-                func.count(DailyPrice.id).label('count')
-            ).filter(
-                DailyPrice.trade_date == latest_date
-            ).group_by('range').all()
-            
-            if distribution:
-                df_dist = pd.DataFrame(distribution)
+        # 最近热门股票
+        st.subheader("📊 数据库中的股票")
+        
+        stocks = db.query(Stock).limit(20).all()
+        if stocks:
+            stock_data = []
+            for s in stocks:
+                # 获取最新价格
+                latest = db.query(DailyPrice).filter(
+                    DailyPrice.stock_code == s.stock_code
+                ).order_by(DailyPrice.trade_date.desc()).first()
                 
-                fig = px.pie(
-                    df_dist,
-                    values='count',
-                    names='range',
-                    title='涨跌分布',
-                    color_discrete_sequence=px.colors.sequential.RdBu
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                if latest:
+                    stock_data.append({
+                        '代码': s.stock_code,
+                        '名称': s.stock_name,
+                        '最新价': latest.close_price,
+                        '涨跌幅': f"{latest.change_pct:.2f}%" if latest.change_pct else "-",
+                        '更新日期': latest.trade_date
+                    })
+            
+            if stock_data:
+                st.dataframe(pd.DataFrame(stock_data), use_container_width=True, hide_index=True)
         
-        # 最近更新
-        st.subheader("📝 最近更新")
-        from database.models import DataUpdateLog
-        
-        recent_logs = db.query(DataUpdateLog).order_by(
-            DataUpdateLog.created_at.desc()
-        ).limit(5).all()
-        
-        if recent_logs:
-            logs_data = []
-            for log in recent_logs:
-                logs_data.append({
-                    '时间': log.created_at.strftime('%Y-%m-%d %H:%M'),
-                    '表名': log.table_name,
-                    '类型': log.update_type,
-                    '记录数': log.record_count,
-                    '状态': log.status
-                })
-            st.dataframe(pd.DataFrame(logs_data), use_container_width=True)
+        # 使用说明
+        st.divider()
+        st.info("""
+        **使用提示**
+        1. 点击左侧 🔍 **股票查询** 进行股票分析
+        2. 输入股票代码后系统自动获取数据并计算指标
+        3. 数据会自动保存到本地数据库，下次查询更快
+        """)
         
     except Exception as e:
         st.error(f"加载数据失败: {e}")
+        st.info("提示: 如果是首次使用，请先通过 🔍 股票查询 添加股票数据")
     finally:
         db.close()

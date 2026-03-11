@@ -14,6 +14,12 @@ class RSIStrategy:
         self.overbought = overbought
         self.oversold = oversold
         self.name = f"RSI_{period}"
+        self.current_idx = 0
+    
+    def __call__(self, day_data: pd.DataFrame, portfolio) -> List[Order]:
+        """使策略可调用"""
+        self.current_idx += 1
+        return self.on_data(day_data, self.current_idx, portfolio)
     
     def calculate_rsi(self, prices: pd.Series) -> float:
         """计算RSI"""

@@ -14,6 +14,12 @@ class MACDStrategy:
         self.slow = slow
         self.signal = signal
         self.name = f"MACD_{fast}_{slow}"
+        self.current_idx = 0
+    
+    def __call__(self, day_data: pd.DataFrame, portfolio) -> List[Order]:
+        """使策略可调用"""
+        self.current_idx += 1
+        return self.on_data(day_data, self.current_idx, portfolio)
     
     def calculate_macd(self, df: pd.DataFrame, current_idx: int) -> tuple:
         """计算MACD"""

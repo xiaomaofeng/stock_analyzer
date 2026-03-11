@@ -10,8 +10,8 @@ from pydantic import Field
 class Settings(BaseSettings):
     """应用配置类 - 支持Windows/Mac/Linux和多种数据库"""
     
-    # 项目路径 (跨平台)
-    PROJECT_ROOT: Path = Path(__file__).parent.parent.absolute()
+    # 项目路径 (跨平台) - 使用resolve()确保路径规范化
+    PROJECT_ROOT: Path = Path(__file__).parent.parent.resolve()
     
     # 平台检测
     PLATFORM: str = Field(default_factory=lambda: platform.system().lower())
@@ -62,9 +62,16 @@ class Settings(BaseSettings):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # 确保数据库URL使用绝对路径（解决SQLite路径问题）
+        if not self.DATABASE_URL or self.DATABASE_URL.startswith("sqlite:///./"):
+            # 使用项目根目录下的data文件夹
+            db_path = self.PROJECT_ROOT / "data" / "stock_db.sqlite"
+            # Windows路径需要转换：F:\path -> F:/path，并且使用4个斜杠
+            db_path_str = str(db_path).replace("\\", "/")
+            self.DATABASE_URL = f"sqlite:///{db_path_str}"
         # 设置跨平台日志路径
-        if self.LOG_PATH is None:
-            self.LOG_PATH = self.PROJECT_ROOT / "logs"
+        if not self.LOG_PATH or self.LOG_PATH == "./logs":
+            self.LOG_PATH = str(self.PROJECT_ROOT / "logs")
     
     @property
     def is_windows(self) -> bool:
@@ -113,11 +120,16 @@ class Settings(BaseSettings):
         if self.is_sqlite:
             # 提取sqlite:///后面的路径
             db_path = self.DATABASE_URL.replace("sqlite:///", "")
-            if db_path.startswith("./"):
-                db_path = db_path[2:]
+            # 如果是绝对路径（Windows如 F:/... 或 Linux如 /...）
+            if len(db_path) > 1 and db_path[1] == ":":
+                # Windows绝对路径 F:\...
+                return Path(db_path)
             elif db_path.startswith("/"):
-                db_path = db_path[1:]
-            return self.PROJECT_ROOT / db_path
+                # Linux/Mac绝对路径
+                return Path(db_path)
+            else:
+                # 相对路径，基于项目根目录
+                return self.PROJECT_ROOT / db_path
         return None
     
     def get_data_dir(self) -> Path:

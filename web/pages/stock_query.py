@@ -1,12 +1,35 @@
 """
 股票查询页面 - 输入代码自动获取数据并分析
 """
+import sys
+from pathlib import Path
+import os
+
+# ============ 关键：确保项目根目录正确设置 ============
+# 计算项目根目录（当前文件是 web/pages/stock_query.py，所以向上两级）
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+
+# 强制切换到项目根目录，确保数据库路径正确
+os.chdir(PROJECT_ROOT)
+
+# 确保项目根目录在Python路径最前面
+if str(PROJECT_ROOT) in sys.path:
+    sys.path.remove(str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
+# ============ 关键：重新加载配置，避免缓存问题 ============
+# 清除可能存在的缓存模块
+modules_to_remove = [k for k in sys.modules.keys() if k.startswith('config') or k.startswith('database')]
+for m in modules_to_remove:
+    del sys.modules[m]
+
+# 重新导入
 from config import get_session_factory, get_settings
 from database.models import Stock, DailyPrice, TechnicalIndicator
 from collectors import AKShareCollector
@@ -19,6 +42,19 @@ from analysis.risk_metrics import RiskMetrics
 def show():
     """显示股票查询页面"""
     st.title("🔍 股票查询与分析")
+    
+    # 显示当前配置（调试用）
+    with st.expander("系统信息（调试用）"):
+        settings = get_settings()
+        st.code(f"工作目录: {os.getcwd()}\nPROJECT_ROOT: {settings.PROJECT_ROOT}\nDATABASE_URL: {settings.DATABASE_URL}")
+        # 测试数据库连接
+        try:
+            db = get_session_factory()()
+            count = db.query(Stock).count()
+            st.success(f"数据库连接正常，已有 {count} 只股票")
+            db.close()
+        except Exception as e:
+            st.error(f"数据库连接失败: {e}")
     
     st.markdown("""
     输入股票代码，系统自动：
@@ -51,12 +87,21 @@ def show():
         query_btn = st.button("🚀 查询并分析", type="primary", use_container_width=True)
     
     if query_btn and stock_code:
-        with st.spinner(f"正在获取 {stock_code} 数据并分析..."):
-            process_stock(stock_code, days)
+        try:
+            with st.spinner(f"正在获取 {stock_code} 数据并分析..."):
+                process_stock(stock_code, days)
+        except Exception as e:
+            st.error(f"❌ 处理失败: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
 
 def process_stock(stock_code: str, days: int):
     """处理股票查询、存储和分析"""
+    
+    # 确保目录存在
+    settings = get_settings()
+    settings.ensure_directories()
     
     SessionLocal = get_session_factory()
     db = SessionLocal()
@@ -71,7 +116,6 @@ def process_stock(stock_code: str, days: int):
             # 步骤2: 从AKShare获取数据
             st.info(f"📥 数据库中没有 {stock_code}，正在从AKShare获取...")
             
-            settings = get_settings()
             collector = AKShareCollector(request_delay=0.5)
             
             # 获取股票信息
@@ -89,7 +133,7 @@ def process_stock(stock_code: str, days: int):
             
             # 获取历史数据
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=days * 2)  # 多获取一些用于计算指标
+            start_date = end_date - timedelta(days=days * 2)
             
             df = collector.get_daily_prices(
                 stock_code,
@@ -134,10 +178,6 @@ def process_stock(stock_code: str, days: int):
         # 步骤4: 显示分析报告
         display_analysis(stock_code, days, db)
         
-    except Exception as e:
-        st.error(f"❌ 处理失败: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
     finally:
         db.close()
 

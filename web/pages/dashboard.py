@@ -77,7 +77,7 @@ def show():
                     (DailyPrice.change_pct == 0, '平盘'),
                     (DailyPrice.change_pct > -3, '下跌 (-3-0%)'),
                     (DailyPrice.change_pct > -7, '大跌 (-7--3%)'),
-                    else='跌停 (<-7%)'
+                    else_='跌停 (<-7%)'
                 ).label('range'),
                 func.count(DailyPrice.id).label('count')
             ).filter(

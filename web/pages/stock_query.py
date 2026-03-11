@@ -476,6 +476,9 @@ if query_btn and stock_code:
                         low_price=float(row['low_price']) if pd.notna(row['low_price']) else None,
                         close_price=float(row['close_price']) if pd.notna(row['close_price']) else None,
                         volume=int(row['volume']) if pd.notna(row['volume']) else None,
+                        amount=float(row['amount']) if 'amount' in row and pd.notna(row['amount']) else None,
+                        change_pct=float(row['change_pct']) if 'change_pct' in row and pd.notna(row['change_pct']) else None,
+                        turnover_rate=float(row['turnover_rate']) if 'turnover_rate' in row and pd.notna(row['turnover_rate']) else None,
                     )
                     db.merge(dp)
                 db.commit()
@@ -486,6 +489,95 @@ if query_btn and stock_code:
                 st.success(t('success_import').format(len(df)))
             else:
                 st.info(t('use_local').format(existing))
+                
+                # 提供更新数据选项
+                col_update1, col_update2, col_update3 = st.columns([2, 2, 2])
+                with col_update1:
+                    force_refresh = st.checkbox('强制更新数据' if lang == 'zh' else 'Force refresh data', key='force_refresh')
+                with col_update2:
+                    if st.button('🔄 更新数据' if lang == 'zh' else '🔄 Update Data', use_container_width=True):
+                        with st.spinner('Updating...' if lang == 'en' else '正在更新数据...'):
+                            try:
+                                collector = AKShareCollector(request_delay=0.5)
+                                calculator = TechnicalCalculator()
+                                
+                                # 获取最新数据
+                                end = datetime.now()
+                                start = end - timedelta(days=days * 2)
+                                df_new = collector.get_daily_prices(stock_code, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
+                                
+                                if df_new.empty:
+                                    st.error('No data fetched' if lang == 'en' else '获取数据失败')
+                                else:
+                                    # 如果强制更新，删除旧数据
+                                    if force_refresh:
+                                        db.query(DailyPrice).filter(DailyPrice.stock_code == stock_code).delete()
+                                        db.query(TechnicalIndicator).filter(TechnicalIndicator.stock_code == stock_code).delete()
+                                        db.commit()
+                                    
+                                    # 保存新数据
+                                    new_count = 0
+                                    for _, row in df_new.iterrows():
+                                        existing = db.query(DailyPrice).filter(
+                                            DailyPrice.stock_code == stock_code,
+                                            DailyPrice.trade_date == row['trade_date']
+                                        ).first()
+                                        
+                                        if not existing or force_refresh:
+                                            if existing and force_refresh:
+                                                db.delete(existing)
+                                            
+                                            dp = DailyPrice(
+                                                stock_code=stock_code,
+                                                trade_date=row['trade_date'],
+                                                open_price=float(row['open_price']) if pd.notna(row['open_price']) else None,
+                                                high_price=float(row['high_price']) if pd.notna(row['high_price']) else None,
+                                                low_price=float(row['low_price']) if pd.notna(row['low_price']) else None,
+                                                close_price=float(row['close_price']) if pd.notna(row['close_price']) else None,
+                                                volume=int(row['volume']) if pd.notna(row['volume']) else None,
+                                                amount=float(row['amount']) if 'amount' in row and pd.notna(row['amount']) else None,
+                                                change_pct=float(row['change_pct']) if 'change_pct' in row and pd.notna(row['change_pct']) else None,
+                                                turnover_rate=float(row['turnover_rate']) if 'turnover_rate' in row and pd.notna(row['turnover_rate']) else None,
+                                            )
+                                            db.merge(dp)
+                                            new_count += 1
+                                    
+                                    db.commit()
+                                    
+                                    # 更新技术指标
+                                    df_calc = calculator.calculate_all(df_new)
+                                    save_indicators_to_db(stock_code, df_calc, db)
+                                    
+                                    st.success(f'✅ 更新成功！新增/更新 {new_count} 条数据')
+                                    st.rerun()
+                                    
+                            except Exception as e:
+                                st.error(f'Update failed: {str(e)}')
+                with col_update3:
+                    if st.button('🗑️ 删除此股票' if lang == 'zh' else '🗑️ Delete this stock', use_container_width=True):
+                        st.session_state['confirm_delete'] = stock_code
+                        st.rerun()
+                
+                # 确认删除对话框
+                if st.session_state.get('confirm_delete') == stock_code:
+                    st.warning('⚠️ 确定要删除此股票的所有数据吗？此操作不可恢复。' if lang == 'zh' else '⚠️ Confirm delete? This cannot be undone.')
+                    col_del1, col_del2 = st.columns(2)
+                    with col_del1:
+                        if st.button('确认删除' if lang == 'zh' else 'Confirm', type='primary'):
+                            try:
+                                db.query(DailyPrice).filter(DailyPrice.stock_code == stock_code).delete()
+                                db.query(TechnicalIndicator).filter(TechnicalIndicator.stock_code == stock_code).delete()
+                                db.query(Stock).filter(Stock.stock_code == stock_code).delete()
+                                db.commit()
+                                st.success(f'✅ {stock_code} 已删除')
+                                del st.session_state['confirm_delete']
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f'Delete failed: {e}')
+                    with col_del2:
+                        if st.button('取消' if lang == 'zh' else 'Cancel'):
+                            del st.session_state['confirm_delete']
+                            st.rerun()
             
             prices = db.query(DailyPrice).filter(DailyPrice.stock_code == stock_code).order_by(DailyPrice.trade_date.desc()).limit(days).all()
             indicators = db.query(TechnicalIndicator).filter(TechnicalIndicator.stock_code == stock_code).order_by(TechnicalIndicator.trade_date.desc()).first()
@@ -503,8 +595,26 @@ if query_btn and stock_code:
             if not df.empty:
                 latest = df.iloc[-1]
                 
+                # 获取股票名称（优先从数据库，不存在则实时获取）
+                stock_record = db.query(Stock).filter(Stock.stock_code == stock_code).first()
+                if stock_record and stock_record.stock_name and stock_record.stock_name != stock_code:
+                    display_name = f"{stock_code} {stock_record.stock_name}"
+                else:
+                    # 实时获取名称
+                    collector = AKShareCollector()
+                    stock_info = collector.get_stock_info(stock_code)
+                    if stock_info and stock_info.get('stock_name') and stock_info['stock_name'] != stock_code:
+                        display_name = f"{stock_code} {stock_info['stock_name']}"
+                        # 更新数据库中的名称
+                        if stock_record:
+                            stock_record.stock_name = stock_info['stock_name']
+                            stock_record.industry = stock_info.get('industry', '')
+                            db.commit()
+                    else:
+                        display_name = stock_code
+                
                 st.divider()
-                st.header(t('analysis').format(stock_code))
+                st.header(t('analysis').format(display_name))
                 
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric(t('latest_price'), f"{latest['close_price']:.3f}", f"{latest['change_pct']:.2f}%")

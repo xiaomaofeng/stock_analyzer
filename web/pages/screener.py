@@ -42,6 +42,7 @@ I18N = {
         'ma_bull': '均线多头',
         'macd_cross': 'MACD金叉',
         'rsi_low': 'RSI超卖',
+        'no_data': '暂无数据',
     },
     'en': {
         'title': '🔎 Stock Screener',
@@ -66,6 +67,7 @@ I18N = {
         'ma_bull': 'MA Bull',
         'macd_cross': 'MACD Cross',
         'rsi_low': 'RSI Low',
+        'no_data': 'No data available',
     }
 }
 
@@ -181,7 +183,7 @@ try:
             else:
                 st.info(t('no_results'))
         else:
-            st.error("No data available")
+            st.error(t('no_data'))
             
 except Exception as e:
     st.error(f"Error: {e}")

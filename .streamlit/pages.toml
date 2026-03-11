@@ -1,0 +1,29 @@
+[[pages]]
+path = "web/app.py"
+name = "🏠 首页"
+icon = "🏠"
+
+[[pages]]
+path = "web/pages/stock_query.py"
+name = "🔍 股票查询"
+icon = "🔍"
+
+[[pages]]
+path = "web/pages/dashboard.py"
+name = "📊 仪表盘"
+icon = "📊"
+
+[[pages]]
+path = "web/pages/stock_viewer.py"
+name = "📈 个股分析"
+icon = "📈"
+
+[[pages]]
+path = "web/pages/backtest.py"
+name = "🔄 策略回测"
+icon = "🔄"
+
+[[pages]]
+path = "web/pages/screener.py"
+name = "🔎 股票筛选"
+icon = "🔎"

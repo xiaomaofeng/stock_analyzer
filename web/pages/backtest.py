@@ -46,6 +46,8 @@ I18N = {
         'price': '价格',
         'quantity': '数量',
         'amount': '金额',
+        'fee': '手续费',
+        'code': '代码',
         'insufficient': '数据不足，请尝试其他股票',
     },
     'en': {
@@ -71,6 +73,8 @@ I18N = {
         'price': 'Price',
         'quantity': 'Quantity',
         'amount': 'Amount',
+        'fee': 'Fee',
+        'code': 'Code',
         'insufficient': 'Insufficient data, try another stock',
     }
 }
@@ -174,8 +178,8 @@ if run_btn and stock_code:
                     'price': t('price'),
                     'quantity': t('quantity'),
                     'amount': t('amount'),
-                    'fee': 'Fee',
-                    'stock_code': 'Code'
+                    'fee': t('fee'),
+                    'stock_code': t('code')
                 }
                 trades_df = trades_df.rename(columns=column_map)
                 st.dataframe(trades_df, use_container_width=True)

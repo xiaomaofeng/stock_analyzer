@@ -1,8 +1,6 @@
 @echo off
-:: 获取脚本所在目录
-set "SCRIPT_DIR=%~dp0"
-cd /d "%SCRIPT_DIR%"
-
-:: 使用相对路径启动
-venv\Scripts\streamlit.exe run web\app.py
+cd /d "%~dp0"
+chcp 65001 >nul
+echo 正在启动股票分析系统...
+venv\Scripts\streamlit.exe run web\app.py --server.port 8501
 pause

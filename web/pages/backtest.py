@@ -167,7 +167,17 @@ if run_btn and stock_code:
             if results['trades']:
                 st.subheader(f"{t('trades_record')} ({len(results['trades'])})")
                 trades_df = pd.DataFrame(results['trades'][:50])
-                trades_df.columns = [t('date'), t('action'), t('price'), t('quantity'), t('amount'), 'PnL']
+                # 重命名列以匹配多语言
+                column_map = {
+                    'timestamp': t('date'),
+                    'side': t('action'),
+                    'price': t('price'),
+                    'quantity': t('quantity'),
+                    'amount': t('amount'),
+                    'fee': 'Fee',
+                    'stock_code': 'Code'
+                }
+                trades_df = trades_df.rename(columns=column_map)
                 st.dataframe(trades_df, use_container_width=True)
                 
         finally:

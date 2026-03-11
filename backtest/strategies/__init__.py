@@ -1,22 +1,7 @@
-"""策略模块"""
-from .strategy_base import (
-    StrategyBase,
-    MultiFactorStrategy,
-    MeanReversionStrategy,
-    TrendFollowingStrategy,
-    ParameterOptimizer,
-    SignalType,
-    StrategySignal,
-    create_strategy
-)
+# -*- coding: utf-8 -*-
+"""回测策略模块"""
+from .ma_strategy import MAStrategy
+from .rsi_strategy import RSIStrategy
+from .macd_strategy import MACDStrategy
 
-__all__ = [
-    'StrategyBase',
-    'MultiFactorStrategy',
-    'MeanReversionStrategy', 
-    'TrendFollowingStrategy',
-    'ParameterOptimizer',
-    'SignalType',
-    'StrategySignal',
-    'create_strategy'
-]
+__all__ = ['MAStrategy', 'RSIStrategy', 'MACDStrategy']

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-股票分析系统 - 桌面应用 (PySide6)
-支持 Windows 和 macOS
+股票分析系统 - Desktop Application
+统一入口：股票查询 + 策略回测 + 现代化UI
 """
 import sys
 from pathlib import Path
@@ -11,17 +11,19 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QLineEdit, QComboBox, QTextEdit, QMessageBox,
-    QProgressBar, QStatusBar, QMenuBar, QMenu, QGridLayout, QGroupBox,
-    QFileDialog, QTabWidget, QSpinBox, QDoubleSpinBox, QSplitter,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QPushButton, QLabel, QLineEdit, QComboBox, QStackedWidget,
+    QFrame, QGridLayout, QStatusBar, QMenuBar, QMenu,
+    QFileDialog, QMessageBox, QScrollArea, QTableWidget, 
+    QTableWidgetItem, QHeaderView, QSpinBox, QDoubleSpinBox,
+    QDateEdit, QSplitter, QTabWidget, QTextEdit
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QDate
 from PySide6.QtGui import QAction, QFont
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
-from config import get_session_factory, get_settings
+from config import get_session_factory
 from database.models import Stock, DailyPrice, TechnicalIndicator
 from collectors import AKShareCollector
 from processors import TechnicalCalculator
@@ -29,16 +31,15 @@ from processors.calculators import save_indicators_to_db
 from analysis import TrendAnalyzer
 from analysis.risk_metrics import RiskMetrics
 
-# 导入自定义组件
-from widgets.candlestick_chart import CandlestickChart, BacktestChart
+from desktop.styles.modern_theme import MODERN_STYLE, COLORS
+from desktop.widgets.candlestick_chart import CandlestickChart, BacktestChart
 
 
 class DataFetchThread(QThread):
-    """数据获取后台线程"""
-    progress = Signal(int)
+    """数据获取线程"""
     status = Signal(str)
     finished_signal = Signal(bool, str)
-    data_ready = Signal(object, object)  # df, indicators
+    data_ready = Signal(object, object)
     
     def __init__(self, stock_code, days):
         super().__init__()
@@ -47,27 +48,32 @@ class DataFetchThread(QThread):
         
     def run(self):
         try:
-            self.status.emit(f"正在获取 {self.stock_code} 数据...")
+            self.status.emit(f"获取 {self.stock_code} 数据中...")
             SessionLocal = get_session_factory()
             db = SessionLocal()
             
             try:
+                # 检查本地数据
                 existing = db.query(DailyPrice).filter(
                     DailyPrice.stock_code == self.stock_code
                 ).count()
                 
+                # 如果没有数据，从网络获取
                 if existing == 0:
-                    self.status.emit("从 AKShare 获取数据...")
+                    self.status.emit("从网络获取数据...")
                     collector = AKShareCollector(request_delay=0.5)
                     stock_info = collector.get_stock_info(self.stock_code)
                     
+                    # 保存股票信息
                     stock = Stock(
                         stock_code=self.stock_code,
                         stock_name=stock_info.get('stock_name', self.stock_code) if stock_info else self.stock_code,
                         exchange=collector._get_exchange(self.stock_code),
                     )
                     db.merge(stock)
+                    db.commit()
                     
+                    # 获取历史数据
                     end = datetime.now()
                     start = end - timedelta(days=self.days * 2)
                     df = collector.get_daily_prices(
@@ -77,10 +83,10 @@ class DataFetchThread(QThread):
                     )
                     
                     if df.empty:
-                        self.finished_signal.emit(False, "无法获取数据")
+                        self.finished_signal.emit(False, "无法获取数据，请检查股票代码")
                         return
                     
-                    total = len(df)
+                    # 保存到数据库
                     for idx, row in df.iterrows():
                         dp = DailyPrice(
                             stock_code=self.stock_code,
@@ -92,17 +98,16 @@ class DataFetchThread(QThread):
                             volume=int(row['volume']) if pd.notna(row['volume']) else None,
                         )
                         db.merge(dp)
-                        self.progress.emit(int((idx + 1) / total * 100))
                     
                     db.commit()
                     
-                    # 计算指标
+                    # 计算技术指标
                     self.status.emit("计算技术指标...")
                     calculator = TechnicalCalculator()
                     df_calc = calculator.calculate_all(df)
                     save_indicators_to_db(self.stock_code, df_calc, db)
                 
-                # 查询数据
+                # 从数据库读取数据
                 prices = db.query(DailyPrice).filter(
                     DailyPrice.stock_code == self.stock_code
                 ).order_by(DailyPrice.trade_date.desc()).limit(self.days).all()
@@ -111,6 +116,7 @@ class DataFetchThread(QThread):
                     TechnicalIndicator.stock_code == self.stock_code
                 ).order_by(TechnicalIndicator.trade_date.desc()).first()
                 
+                # 转换为DataFrame
                 df = pd.DataFrame([{
                     'trade_date': p.trade_date,
                     'open_price': float(p.open_price) if p.open_price else 0,
@@ -122,16 +128,17 @@ class DataFetchThread(QThread):
                 } for p in reversed(prices)])
                 
                 self.data_ready.emit(df, indicators)
-                self.finished_signal.emit(True, f"成功加载 {len(df)} 条数据")
+                self.finished_signal.emit(True, f"已加载 {len(df)} 条数据")
                 
             finally:
                 db.close()
         except Exception as e:
-            self.finished_signal.emit(False, str(e))
+            import traceback
+            self.finished_signal.emit(False, f"{str(e)}\n{traceback.format_exc()}")
 
 
 class BacktestThread(QThread):
-    """回测后台线程"""
+    """回测线程"""
     status = Signal(str)
     finished_signal = Signal(bool, str, object)
     
@@ -161,9 +168,10 @@ class BacktestThread(QThread):
                 ).order_by(DailyPrice.trade_date).all()
                 
                 if len(prices) < 60:
-                    self.finished_signal.emit(False, "数据不足，至少需要60天数据", None)
+                    self.finished_signal.emit(False, "数据不足，至少需要60个交易日", None)
                     return
                 
+                # 构建DataFrame
                 df = pd.DataFrame([{
                     'trade_date': p.trade_date,
                     'open_price': float(p.open_price) if p.open_price else 0,
@@ -173,11 +181,11 @@ class BacktestThread(QThread):
                     'volume': p.volume or 0,
                 } for p in prices])
                 
-                # 计算指标
-                from processors import TechnicalCalculator
-                calc = TechnicalCalculator()
-                df = calc.calculate_all(df)
+                # 计算技术指标
+                calculator = TechnicalCalculator()
+                df = calculator.calculate_all(df)
                 
+                # 配置回测
                 config = BacktestConfig(
                     initial_capital=self.initial_capital,
                     commission_rate=self.commission
@@ -189,7 +197,7 @@ class BacktestThread(QThread):
                     strategy = MAStrategy(short_period=5, long_period=20)
                 elif self.strategy_name == "RSI超买超卖":
                     strategy = RSIStrategy(overbought=70, oversold=30)
-                else:  # MACD
+                else:  # MACD金叉死叉
                     strategy = MACDStrategy()
                 
                 engine.set_strategy(strategy)
@@ -204,272 +212,489 @@ class BacktestThread(QThread):
                 db.close()
         except Exception as e:
             import traceback
-            self.finished_signal.emit(False, str(e) + "\n" + traceback.format_exc(), None)
+            self.finished_signal.emit(False, f"{str(e)}\n{traceback.format_exc()}", None)
 
 
-class StockAnalyzerApp(QMainWindow):
+class MetricCard(QFrame):
+    """指标卡片"""
+    def __init__(self, title, value="-", unit="", color=None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("metricCard")
+        self.setStyleSheet(f"""
+            QFrame#metricCard {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(4)
+        layout.setContentsMargins(16, 16, 16, 16)
+        
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        layout.addWidget(self.title_label)
+        
+        value_layout = QHBoxLayout()
+        self.value_label = QLabel(value)
+        text_color = color if color else COLORS['text']
+        self.value_label.setStyleSheet(f"color: {text_color}; font-size: 24px; font-weight: 700;")
+        value_layout.addWidget(self.value_label)
+        
+        if unit:
+            self.unit_label = QLabel(unit)
+            self.unit_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+            value_layout.addWidget(self.unit_label)
+        
+        value_layout.addStretch()
+        layout.addLayout(value_layout)
+        
+        self.setMinimumWidth(160)
+        self.setMaximumWidth(220)
+    
+    def set_value(self, value, color=None):
+        self.value_label.setText(value)
+        if color:
+            self.value_label.setStyleSheet(f"color: {color}; font-size: 24px; font-weight: 700;")
+
+
+class SidebarButton(QPushButton):
+    """侧边栏按钮"""
+    def __init__(self, text, icon, parent=None):
+        super().__init__(parent)
+        self.setText(f"{icon}  {text}")
+        self.setCheckable(True)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['text_secondary']};
+                border: none;
+                border-radius: 8px;
+                padding: 12px 16px;
+                font-size: 14px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['hover']};
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: white;
+            }}
+        """)
+        self.setCursor(Qt.PointingHandCursor)
+
+
+class MainWindow(QMainWindow):
     """主窗口"""
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("股票分析系统 v2.0")
-        self.setGeometry(100, 100, 1600, 1000)
+        self.setWindowTitle("股票分析系统")
+        self.setMinimumSize(1400, 900)
+        self.resize(1600, 1000)
         
         self.current_df = None
         self.current_indicators = None
         self.stock_code = None
         
         self.init_ui()
-        self.init_menu()
+        self.setStyleSheet(MODERN_STYLE)
         self.check_database()
     
     def init_ui(self):
         """初始化界面"""
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QHBoxLayout(central)
         
-        # 创建标签页
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        # 股票查询页
-        self.query_tab = self.create_query_tab()
-        self.tabs.addTab(self.query_tab, "股票查询")
+        # 侧边栏
+        sidebar = self.create_sidebar()
+        main_layout.addWidget(sidebar)
         
-        # 回测页
-        self.backtest_tab = self.create_backtest_tab()
-        self.tabs.addTab(self.backtest_tab, "策略回测")
+        # 内容区
+        content = self.create_content()
+        main_layout.addWidget(content, 1)
         
         # 状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("就绪")
+        
+        self.create_menu()
     
-    def create_query_tab(self):
-        """创建股票查询页"""
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
+    def create_sidebar(self):
+        """创建侧边栏"""
+        sidebar = QFrame()
+        sidebar.setFixedWidth(200)
+        sidebar.setStyleSheet(f"background-color: {COLORS['surface']}; border-right: 1px solid {COLORS['border']};")
         
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(12, 20, 12, 20)
+        layout.setSpacing(4)
         
-        # 左侧面板
-        left_panel = self.create_query_left_panel()
-        splitter.addWidget(left_panel)
+        # 标题
+        title = QLabel("📈 股票分析")
+        title.setStyleSheet(f"color: {COLORS['text']}; font-size: 18px; font-weight: 700; padding: 8px;")
+        layout.addWidget(title)
         
-        # 右侧图表
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        self.chart = CandlestickChart()
-        right_layout.addWidget(self.chart)
-        splitter.addWidget(right_panel)
+        layout.addSpacing(20)
         
-        splitter.setSizes([400, 1200])
-        return tab
-    
-    def create_query_left_panel(self):
-        """创建查询左侧面板"""
-        panel = QGroupBox("控制面板")
-        layout = QVBoxLayout()
+        # 导航按钮
+        self.nav_buttons = []
         
-        # 股票代码
-        code_layout = QHBoxLayout()
-        code_layout.addWidget(QLabel("股票代码:"))
-        self.code_input = QLineEdit("159892")
-        code_layout.addWidget(self.code_input)
-        layout.addLayout(code_layout)
+        self.btn_query = SidebarButton("股票查询", "🔍")
+        self.btn_query.setChecked(True)
+        self.btn_query.clicked.connect(lambda: self.switch_page(0))
+        layout.addWidget(self.btn_query)
+        self.nav_buttons.append(self.btn_query)
         
-        # 数据范围
-        days_layout = QHBoxLayout()
-        days_layout.addWidget(QLabel("数据范围:"))
-        self.days_combo = QComboBox()
-        self.days_combo.addItems(["60天", "120天", "252天", "500天"])
-        self.days_combo.setCurrentIndex(2)
-        days_layout.addWidget(self.days_combo)
-        layout.addLayout(days_layout)
-        
-        # 查询按钮
-        self.query_btn = QPushButton("查询并分析")
-        self.query_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1890ff; color: white;
-                padding: 10px; font-size: 14px; border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #40a9ff; }
-        """)
-        self.query_btn.clicked.connect(self.on_query)
-        layout.addWidget(self.query_btn)
-        
-        # 进度条
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
-        # 基本信息
-        self.info_group = QGroupBox("基本信息")
-        info_layout = QGridLayout()
-        self.info_labels = {}
-        for i, (label, key) in enumerate([("最新价", "price"), ("涨跌幅", "change"), ("成交量", "vol"), ("最高", "high"), ("最低", "low")]):
-            info_layout.addWidget(QLabel(f"{label}:"), i, 0)
-            self.info_labels[key] = QLabel("-")
-            self.info_labels[key].setStyleSheet("color: #1890ff; font-weight: bold;")
-            info_layout.addWidget(self.info_labels[key], i, 1)
-        self.info_group.setLayout(info_layout)
-        layout.addWidget(self.info_group)
-        
-        # 技术指标
-        self.indicator_group = QGroupBox("技术指标")
-        ind_layout = QGridLayout()
-        self.indicator_labels = {}
-        fields = [("MA5", "ma5"), ("MA20", "ma20"), ("MA60", "ma60"), ("MACD DIF", "dif"), ("MACD DEA", "dea"), ("RSI12", "rsi")]
-        for i, (label, key) in enumerate(fields):
-            ind_layout.addWidget(QLabel(f"{label}:"), i//2, (i%2)*2)
-            self.indicator_labels[key] = QLabel("-")
-            ind_layout.addWidget(self.indicator_labels[key], i//2, (i%2)*2+1)
-        self.indicator_group.setLayout(ind_layout)
-        layout.addWidget(self.indicator_group)
-        
-        # 趋势分析
-        self.trend_group = QGroupBox("趋势分析")
-        trend_layout = QVBoxLayout()
-        self.trend_text = QTextEdit()
-        self.trend_text.setReadOnly(True)
-        self.trend_text.setMaximumHeight(100)
-        trend_layout.addWidget(self.trend_text)
-        self.trend_group.setLayout(trend_layout)
-        layout.addWidget(self.trend_group)
-        
-        # 风险指标
-        self.risk_group = QGroupBox("风险指标")
-        risk_layout = QGridLayout()
-        self.risk_labels = {}
-        for i, (label, key) in enumerate([("年化收益", "ret"), ("波动率", "vol"), ("最大回撤", "dd"), ("夏普比率", "sharpe")]):
-            risk_layout.addWidget(QLabel(f"{label}:"), i//2, (i%2)*2)
-            self.risk_labels[key] = QLabel("-")
-            risk_layout.addWidget(self.risk_labels[key], i//2, (i%2)*2+1)
-        self.risk_group.setLayout(risk_layout)
-        layout.addWidget(self.risk_group)
+        self.btn_backtest = SidebarButton("策略回测", "📊")
+        self.btn_backtest.clicked.connect(lambda: self.switch_page(1))
+        layout.addWidget(self.btn_backtest)
+        self.nav_buttons.append(self.btn_backtest)
         
         layout.addStretch()
         
-        # 导出按钮
-        self.export_btn = QPushButton("导出数据(CSV)")
-        self.export_btn.clicked.connect(self.export_data)
-        layout.addWidget(self.export_btn)
+        # 版本
+        version = QLabel("v2.0.0")
+        version.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
+        version.setAlignment(Qt.AlignCenter)
+        layout.addWidget(version)
         
-        panel.setLayout(layout)
-        panel.setMaximumWidth(380)
-        return panel
+        return sidebar
     
-    def create_backtest_tab(self):
-        """创建回测页面"""
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
+    def create_content(self):
+        """创建内容区"""
+        content = QWidget()
+        content.setStyleSheet(f"background-color: {COLORS['background']};")
         
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(20)
         
-        # 左侧控制面板
-        left_panel = QGroupBox("回测设置")
-        left_layout = QVBoxLayout()
+        # 页面堆叠
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack)
+        
+        # 添加页面
+        self.stack.addWidget(self.create_query_page())
+        self.stack.addWidget(self.create_backtest_page())
+        
+        return content
+    
+    def create_query_page(self):
+        """股票查询页"""
+        page = QScrollArea()
+        page.setWidgetResizable(True)
+        page.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setSpacing(20)
+        
+        # 搜索栏
+        search_frame = QFrame()
+        search_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+                padding: 4px;
+            }}
+        """)
+        search_layout = QHBoxLayout(search_frame)
+        search_layout.setSpacing(12)
+        
+        search_title = QLabel("股票查询")
+        search_title.setStyleSheet(f"color: {COLORS['text']}; font-size: 18px; font-weight: 600;")
+        search_layout.addWidget(search_title)
+        
+        search_layout.addStretch()
+        
+        self.code_input = QLineEdit()
+        self.code_input.setPlaceholderText("输入股票代码，如 159892")
+        self.code_input.setText("159892")
+        self.code_input.setFixedWidth(180)
+        search_layout.addWidget(self.code_input)
+        
+        self.days_combo = QComboBox()
+        self.days_combo.addItems(["60天", "120天", "252天", "500天"])
+        self.days_combo.setCurrentIndex(2)
+        self.days_combo.setFixedWidth(90)
+        search_layout.addWidget(self.days_combo)
+        
+        self.query_btn = QPushButton("查询")
+        self.query_btn.setFixedWidth(80)
+        self.query_btn.clicked.connect(self.on_query)
+        search_layout.addWidget(self.query_btn)
+        
+        layout.addWidget(search_frame)
+        
+        # 指标卡片
+        cards_frame = QFrame()
+        cards_layout = QHBoxLayout(cards_frame)
+        cards_layout.setSpacing(12)
+        cards_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.metric_cards = {
+            'price': MetricCard("最新价", "-"),
+            'change': MetricCard("涨跌幅", "-", "%"),
+            'volume': MetricCard("成交量", "-", "万"),
+            'high': MetricCard("最高", "-"),
+            'low': MetricCard("最低", "-"),
+        }
+        
+        for card in self.metric_cards.values():
+            cards_layout.addWidget(card)
+        
+        cards_layout.addStretch()
+        layout.addWidget(cards_frame)
+        
+        # 图表区
+        chart_frame = QFrame()
+        chart_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+            }}
+        """)
+        chart_layout = QVBoxLayout(chart_frame)
+        chart_layout.setContentsMargins(12, 12, 12, 12)
+        
+        self.chart = CandlestickChart()
+        chart_layout.addWidget(self.chart)
+        
+        layout.addWidget(chart_frame, 1)
+        
+        # 分析区
+        analysis_splitter = QSplitter(Qt.Horizontal)
+        
+        # 趋势分析
+        trend_frame = QFrame()
+        trend_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+                padding: 16px;
+            }}
+        """)
+        trend_layout = QVBoxLayout(trend_frame)
+        
+        trend_title = QLabel("趋势分析")
+        trend_title.setStyleSheet(f"color: {COLORS['text']}; font-size: 16px; font-weight: 600;")
+        trend_layout.addWidget(trend_title)
+        
+        self.trend_text = QLabel("点击查询开始分析")
+        self.trend_text.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 13px;")
+        self.trend_text.setWordWrap(True)
+        self.trend_text.setMinimumHeight(80)
+        trend_layout.addWidget(self.trend_text)
+        trend_layout.addStretch()
+        
+        analysis_splitter.addWidget(trend_frame)
+        
+        # 技术指标
+        ind_frame = QFrame()
+        ind_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+                padding: 16px;
+            }}
+        """)
+        ind_layout = QGridLayout(ind_frame)
+        ind_layout.setSpacing(12)
+        
+        ind_title = QLabel("技术指标")
+        ind_title.setStyleSheet(f"color: {COLORS['text']}; font-size: 16px; font-weight: 600;")
+        ind_layout.addWidget(ind_title, 0, 0, 1, 4)
+        
+        self.indicator_labels = {}
+        indicators = [("MA5", "ma5"), ("MA20", "ma20"), ("MA60", "ma60"),
+                      ("DIF", "dif"), ("DEA", "dea"), ("RSI", "rsi")]
+        
+        for i, (name, key) in enumerate(indicators):
+            row = (i // 3) + 1
+            col = (i % 3) * 2
+            label = QLabel(f"{name}:")
+            label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+            ind_layout.addWidget(label, row, col)
+            
+            value = QLabel("-")
+            value.setStyleSheet(f"color: {COLORS['text']}; font-size: 14px; font-weight: 500;")
+            self.indicator_labels[key] = value
+            ind_layout.addWidget(value, row, col + 1)
+        
+        analysis_splitter.addWidget(ind_frame)
+        analysis_splitter.setSizes([300, 400])
+        
+        layout.addWidget(analysis_splitter)
+        
+        page.setWidget(container)
+        return page
+    
+    def create_backtest_page(self):
+        """回测页"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setSpacing(20)
+        
+        # 设置区
+        settings_frame = QFrame()
+        settings_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+                padding: 8px;
+            }}
+        """)
+        settings_layout = QHBoxLayout(settings_frame)
+        settings_layout.setSpacing(16)
         
         # 股票代码
-        code_layout = QHBoxLayout()
-        code_layout.addWidget(QLabel("股票代码:"))
+        settings_layout.addWidget(QLabel("股票:"))
         self.bt_code_input = QLineEdit("159892")
-        code_layout.addWidget(self.bt_code_input)
-        left_layout.addLayout(code_layout)
+        self.bt_code_input.setFixedWidth(100)
+        settings_layout.addWidget(self.bt_code_input)
         
-        # 策略选择
-        strategy_layout = QHBoxLayout()
-        strategy_layout.addWidget(QLabel("策略:"))
+        # 策略
+        settings_layout.addWidget(QLabel("策略:"))
         self.strategy_combo = QComboBox()
         self.strategy_combo.addItems(["均线交叉", "RSI超买超卖", "MACD金叉死叉"])
-        strategy_layout.addWidget(self.strategy_combo)
-        left_layout.addLayout(strategy_layout)
+        self.strategy_combo.setFixedWidth(120)
+        settings_layout.addWidget(self.strategy_combo)
         
         # 初始资金
-        capital_layout = QHBoxLayout()
-        capital_layout.addWidget(QLabel("初始资金:"))
+        settings_layout.addWidget(QLabel("资金:"))
         self.capital_spin = QSpinBox()
         self.capital_spin.setRange(10000, 10000000)
         self.capital_spin.setValue(100000)
         self.capital_spin.setSingleStep(10000)
-        capital_layout.addWidget(self.capital_spin)
-        left_layout.addLayout(capital_layout)
-        
-        # 手续费
-        commission_layout = QHBoxLayout()
-        commission_layout.addWidget(QLabel("手续费率:"))
-        self.commission_spin = QDoubleSpinBox()
-        self.commission_spin.setRange(0.0001, 0.01)
-        self.commission_spin.setValue(0.0003)
-        self.commission_spin.setDecimals(4)
-        self.commission_spin.setSingleStep(0.0001)
-        commission_layout.addWidget(self.commission_spin)
-        left_layout.addLayout(commission_layout)
+        self.capital_spin.setFixedWidth(100)
+        settings_layout.addWidget(self.capital_spin)
         
         # 回测按钮
         self.backtest_btn = QPushButton("开始回测")
-        self.backtest_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #52c41a; color: white;
-                padding: 10px; font-size: 14px; border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #73d13d; }
+        self.backtest_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['success']};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{ background-color: #2da44e; }}
         """)
-        self.backtest_btn.clicked.connect(self.run_backtest)
-        left_layout.addWidget(self.backtest_btn)
+        self.backtest_btn.clicked.connect(self.on_backtest)
+        settings_layout.addWidget(self.backtest_btn)
+        
+        settings_layout.addStretch()
+        layout.addWidget(settings_frame)
+        
+        # 结果区
+        result_splitter = QSplitter(Qt.Horizontal)
         
         # 结果摘要
-        self.bt_result_group = QGroupBox("回测结果")
-        result_layout = QGridLayout()
+        result_frame = QFrame()
+        result_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+                padding: 16px;
+            }}
+        """)
+        result_layout = QVBoxLayout(result_frame)
+        
+        result_title = QLabel("回测结果")
+        result_title.setStyleSheet(f"color: {COLORS['text']}; font-size: 16px; font-weight: 600;")
+        result_layout.addWidget(result_title)
+        
         self.bt_result_labels = {}
+        result_grid = QGridLayout()
+        result_grid.setSpacing(12)
+        
         fields = [
-            ("总收益率", "total_ret"), ("年化收益率", "annual_ret"),
+            ("总收益率", "total_ret"), ("年化收益", "annual_ret"),
             ("最大回撤", "max_dd"), ("夏普比率", "sharpe"),
             ("交易次数", "trades"), ("胜率", "win_rate")
         ]
-        for i, (label, key) in enumerate(fields):
-            result_layout.addWidget(QLabel(f"{label}:"), i//2, (i%2)*2)
-            self.bt_result_labels[key] = QLabel("-")
-            self.bt_result_labels[key].setStyleSheet("color: #52c41a; font-weight: bold;")
-            result_layout.addWidget(self.bt_result_labels[key], i//2, (i%2)*2+1)
-        self.bt_result_group.setLayout(result_layout)
-        left_layout.addWidget(self.bt_result_group)
         
-        # 交易记录表格
-        self.trades_group = QGroupBox("交易记录")
-        trades_layout = QVBoxLayout()
+        for i, (label, key) in enumerate(fields):
+            result_grid.addWidget(QLabel(f"{label}:", styleSheet=f"color: {COLORS['text_secondary']};"), i, 0)
+            value_label = QLabel("-")
+            value_label.setStyleSheet(f"color: {COLORS['text']}; font-weight: 600;")
+            self.bt_result_labels[key] = value_label
+            result_grid.addWidget(value_label, i, 1)
+        
+        result_layout.addLayout(result_grid)
+        result_layout.addStretch()
+        
+        result_splitter.addWidget(result_frame)
+        
+        # 图表
+        chart_frame = QFrame()
+        chart_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+            }}
+        """)
+        chart_layout = QVBoxLayout(chart_frame)
+        chart_layout.setContentsMargins(12, 12, 12, 12)
+        
+        self.backtest_chart = BacktestChart()
+        chart_layout.addWidget(self.backtest_chart)
+        
+        result_splitter.addWidget(chart_frame)
+        result_splitter.setSizes([250, 750])
+        
+        layout.addWidget(result_splitter, 1)
+        
+        # 交易记录
+        trades_frame = QFrame()
+        trades_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+                padding: 12px;
+            }}
+        """)
+        trades_layout = QVBoxLayout(trades_frame)
+        
+        trades_title = QLabel("交易记录")
+        trades_title.setStyleSheet(f"color: {COLORS['text']}; font-size: 14px; font-weight: 600;")
+        trades_layout.addWidget(trades_title)
+        
         self.trades_table = QTableWidget()
         self.trades_table.setColumnCount(5)
         self.trades_table.setHorizontalHeaderLabels(["日期", "操作", "价格", "数量", "金额"])
         self.trades_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.trades_table.setMaximumHeight(200)
         trades_layout.addWidget(self.trades_table)
-        self.trades_group.setLayout(trades_layout)
-        left_layout.addWidget(self.trades_group)
         
-        left_layout.addStretch()
-        left_panel.setLayout(left_layout)
-        left_panel.setMaximumWidth(400)
-        splitter.addWidget(left_panel)
+        layout.addWidget(trades_frame)
         
-        # 右侧图表
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        self.backtest_chart = BacktestChart()
-        right_layout.addWidget(self.backtest_chart)
-        splitter.addWidget(right_panel)
-        
-        splitter.setSizes([400, 1200])
-        return tab
+        return page
     
-    def init_menu(self):
-        """初始化菜单"""
+    def create_menu(self):
+        """菜单栏"""
         menubar = self.menuBar()
         
         file_menu = menubar.addMenu("文件")
+        
         export_action = QAction("导出数据", self)
         export_action.setShortcut("Ctrl+S")
         export_action.triggered.connect(self.export_data)
@@ -479,11 +704,6 @@ class StockAnalyzerApp(QMainWindow):
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
-        help_menu = menubar.addMenu("帮助")
-        about_action = QAction("关于", self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
     
     def check_database(self):
         """检查数据库"""
@@ -495,22 +715,27 @@ class StockAnalyzerApp(QMainWindow):
         except Exception as e:
             self.status_bar.showMessage(f"数据库错误: {e}")
     
+    def switch_page(self, index):
+        """切换页面"""
+        self.stack.setCurrentIndex(index)
+        for btn in self.nav_buttons:
+            btn.setChecked(False)
+        self.nav_buttons[index].setChecked(True)
+    
     def on_query(self):
-        """查询股票"""
+        """查询"""
         stock_code = self.code_input.text().strip()
         if not stock_code:
-            QMessageBox.warning(self, "警告", "请输入股票代码")
+            QMessageBox.warning(self, "提示", "请输入股票代码")
             return
         
         self.stock_code = stock_code
         days = int(self.days_combo.currentText().replace("天", ""))
         
         self.query_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
+        self.query_btn.setText("加载中...")
         
         self.thread = DataFetchThread(stock_code, days)
-        self.thread.progress.connect(self.progress_bar.setValue)
         self.thread.status.connect(self.status_bar.showMessage)
         self.thread.finished_signal.connect(self.on_query_finished)
         self.thread.data_ready.connect(self.on_data_ready)
@@ -519,10 +744,10 @@ class StockAnalyzerApp(QMainWindow):
     def on_query_finished(self, success, message):
         """查询完成"""
         self.query_btn.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        if success:
-            self.status_bar.showMessage(message)
-        else:
+        self.query_btn.setText("查询")
+        self.status_bar.showMessage(message)
+        
+        if not success:
             QMessageBox.critical(self, "错误", message)
     
     def on_data_ready(self, df, indicators):
@@ -535,64 +760,58 @@ class StockAnalyzerApp(QMainWindow):
         
         latest = df.iloc[-1]
         
-        # 更新基本信息
-        self.info_labels["price"].setText(f"{latest['close_price']:.3f}")
-        self.info_labels["change"].setText(f"{latest['change_pct']:.2f}%")
-        self.info_labels["vol"].setText(f"{latest['volume']/10000:.0f}万")
-        self.info_labels["high"].setText(f"{latest['high_price']:.3f}")
-        self.info_labels["low"].setText(f"{latest['low_price']:.3f}")
+        # 更新卡片
+        self.metric_cards['price'].set_value(f"{latest['close_price']:.3f}")
         
-        # 更新指标
-        if indicators:
-            self.indicator_labels["ma5"].setText(f"{indicators.ma5:.3f}" if indicators.ma5 else "-")
-            self.indicator_labels["ma20"].setText(f"{indicators.ma20:.3f}" if indicators.ma20 else "-")
-            self.indicator_labels["ma60"].setText(f"{indicators.ma60:.3f}" if indicators.ma60 else "-")
-            self.indicator_labels["dif"].setText(f"{indicators.macd_dif:.4f}" if indicators.macd_dif else "-")
-            self.indicator_labels["dea"].setText(f"{indicators.macd_dea:.4f}" if indicators.macd_dea else "-")
-            self.indicator_labels["rsi"].setText(f"{indicators.rsi12:.2f}" if indicators.rsi12 else "-")
+        change_color = COLORS['success'] if latest['change_pct'] >= 0 else COLORS['danger']
+        self.metric_cards['change'].set_value(f"{latest['change_pct']:+.2f}", change_color)
         
-        # 更新趋势分析
+        self.metric_cards['volume'].set_value(f"{latest['volume']/10000:.1f}")
+        self.metric_cards['high'].set_value(f"{latest['high_price']:.3f}")
+        self.metric_cards['low'].set_value(f"{latest['low_price']:.3f}")
+        
+        # 更新图表
+        self.chart.update_chart(df, indicators)
+        
+        # 更新趋势
         try:
             analyzer = TrendAnalyzer(df)
             result = analyzer.analyze()
-            text = f"趋势: {result.direction.value} | 强度: {result.strength.value} | 持续{result.trend_days}天\n{result.description}"
+            text = f"<b>趋势:</b> {result.direction.value} | <b>强度:</b> {result.strength.value} | <b>持续:</b> {result.trend_days}天<br><br>{result.description}"
+            if result.support_levels:
+                text += f"<br><br><b>支撑:</b> {', '.join([f'{s:.3f}' for s in result.support_levels[:3]])}"
+            if result.resistance_levels:
+                text += f"<br><b>阻力:</b> {', '.join([f'{r:.3f}' for r in result.resistance_levels[:3]])}"
             self.trend_text.setText(text)
         except Exception as e:
             self.trend_text.setText(f"分析失败: {e}")
         
-        # 更新风险指标
-        try:
-            returns = df['close_price'].pct_change().dropna()
-            if len(returns) > 30:
-                metrics = RiskMetrics(returns)
-                result = metrics.calculate_all()
-                self.risk_labels["ret"].setText(f"{result.annualized_return*100:.1f}%")
-                self.risk_labels["vol"].setText(f"{result.annualized_volatility*100:.1f}%")
-                self.risk_labels["dd"].setText(f"{result.max_drawdown*100:.1f}%")
-                self.risk_labels["sharpe"].setText(f"{result.sharpe_ratio:.2f}")
-        except Exception as e:
-            pass
-        
-        # 更新图表
-        self.chart.update_chart(df, indicators)
+        # 更新指标
+        if indicators:
+            self.indicator_labels['ma5'].setText(f"{indicators.ma5:.2f}" if indicators.ma5 else "-")
+            self.indicator_labels['ma20'].setText(f"{indicators.ma20:.2f}" if indicators.ma20 else "-")
+            self.indicator_labels['ma60'].setText(f"{indicators.ma60:.2f}" if indicators.ma60 else "-")
+            self.indicator_labels['dif'].setText(f"{indicators.macd_dif:.3f}" if indicators.macd_dif else "-")
+            self.indicator_labels['dea'].setText(f"{indicators.macd_dea:.3f}" if indicators.macd_dea else "-")
+            self.indicator_labels['rsi'].setText(f"{indicators.rsi12:.1f}" if indicators.rsi12 else "-")
     
-    def run_backtest(self):
-        """运行回测"""
+    def on_backtest(self):
+        """回测"""
         stock_code = self.bt_code_input.text().strip()
         if not stock_code:
-            QMessageBox.warning(self, "警告", "请输入股票代码")
+            QMessageBox.warning(self, "提示", "请输入股票代码")
             return
         
-        # 使用全部历史数据回测
+        # 默认回测最近2年
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=730)  # 2年
+        start_date = end_date - timedelta(days=730)
         
         strategy = self.strategy_combo.currentText()
         capital = self.capital_spin.value()
-        commission = self.commission_spin.value()
+        commission = 0.0003
         
         self.backtest_btn.setEnabled(False)
-        self.status_bar.showMessage("回测中...")
+        self.backtest_btn.setText("回测中...")
         
         self.bt_thread = BacktestThread(stock_code, start_date, end_date, strategy, capital, commission)
         self.bt_thread.status.connect(self.status_bar.showMessage)
@@ -602,29 +821,28 @@ class StockAnalyzerApp(QMainWindow):
     def on_backtest_finished(self, success, message, results):
         """回测完成"""
         self.backtest_btn.setEnabled(True)
+        self.backtest_btn.setText("开始回测")
+        self.status_bar.showMessage(message)
         
         if not success:
             QMessageBox.critical(self, "回测失败", message)
-            self.status_bar.showMessage("回测失败")
             return
         
-        self.status_bar.showMessage(message)
-        
         # 更新结果
-        self.bt_result_labels["total_ret"].setText(f"{results['total_return']*100:.2f}%")
-        self.bt_result_labels["annual_ret"].setText(f"{results['annualized_return']*100:.2f}%")
-        self.bt_result_labels["max_dd"].setText(f"{results['max_drawdown']*100:.2f}%")
-        self.bt_result_labels["sharpe"].setText(f"{results['sharpe_ratio']:.2f}")
-        self.bt_result_labels["trades"].setText(str(len(results['trades'])))
+        self.bt_result_labels['total_ret'].setText(f"{results['total_return']*100:.2f}%")
+        self.bt_result_labels['annual_ret'].setText(f"{results['annualized_return']*100:.2f}%")
+        self.bt_result_labels['max_dd'].setText(f"{results['max_drawdown']*100:.2f}%")
+        self.bt_result_labels['sharpe'].setText(f"{results['sharpe_ratio']:.2f}")
+        self.bt_result_labels['trades'].setText(str(len(results['trades'])))
         
         # 计算胜率
         if results['trades']:
             profits = [t['pnl'] for t in results['trades'] if t['pnl'] is not None]
             wins = sum(1 for p in profits if p > 0)
             win_rate = wins / len(profits) * 100 if profits else 0
-            self.bt_result_labels["win_rate"].setText(f"{win_rate:.1f}%")
+            self.bt_result_labels['win_rate'].setText(f"{win_rate:.1f}%")
             
-            # 更新交易记录表
+            # 更新交易表
             self.trades_table.setRowCount(min(len(results['trades']), 50))
             for i, trade in enumerate(results['trades'][:50]):
                 self.trades_table.setItem(i, 0, QTableWidgetItem(str(trade['timestamp'])))
@@ -637,30 +855,26 @@ class StockAnalyzerApp(QMainWindow):
         self.backtest_chart.update_backtest(results)
     
     def export_data(self):
-        """导出数据"""
+        """导出"""
         if self.current_df is None:
-            QMessageBox.warning(self, "警告", "没有数据可导出")
+            QMessageBox.warning(self, "提示", "没有数据可导出")
             return
         
-        path, _ = QFileDialog.getSaveFileName(self, "保存数据", f"{self.stock_code}.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "导出", f"{self.stock_code}.csv", "CSV (*.csv)")
         if path:
             self.current_df.to_csv(path, index=False)
-            QMessageBox.information(self, "成功", f"数据已保存到:\n{path}")
-    
-    def show_about(self):
-        """关于"""
-        QMessageBox.about(self, "关于", "股票分析系统 v2.0\n\n基于 PySide6 的跨平台桌面应用")
+            QMessageBox.information(self, "成功", "数据已导出")
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("股票分析系统")
-    app.setStyle('Fusion')
     
-    font = QFont("Microsoft YaHei" if sys.platform == 'win32' else "PingFang SC", 10)
+    # 字体
+    font = QFont("Segoe UI" if sys.platform == 'win32' else "PingFang SC", 10)
     app.setFont(font)
     
-    window = StockAnalyzerApp()
+    window = MainWindow()
     window.show()
     sys.exit(app.exec())
 

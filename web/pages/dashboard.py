@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """仪表盘 - 数据库概览"""
 import sys
 from pathlib import Path

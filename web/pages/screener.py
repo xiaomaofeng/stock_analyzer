@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """股票筛选器 - 多条件筛选"""
 import sys
 from pathlib import Path

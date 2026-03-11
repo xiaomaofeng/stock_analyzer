@@ -1,21 +1,14 @@
-"""
-股票查询页面 - 输入代码自动获取数据并分析
-"""
+# -*- coding: utf-8 -*-
+"""股票查询页面 - 输入代码自动获取数据并分析"""
 import sys
 from pathlib import Path
 import os
 
-# ============ 关键：确保项目根目录正确设置 ============
-# 计算项目根目录（当前文件是 web/pages/stock_query.py，所以向上两级）
+# 设置项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
-
-# 强制切换到项目根目录，确保数据库路径正确
 os.chdir(PROJECT_ROOT)
-
-# 确保项目根目录在Python路径最前面
-if str(PROJECT_ROOT) in sys.path:
-    sys.path.remove(str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
 import pandas as pd
@@ -23,13 +16,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
-# ============ 关键：重新加载配置，避免缓存问题 ============
-# 清除可能存在的缓存模块
-modules_to_remove = [k for k in sys.modules.keys() if k.startswith('config') or k.startswith('database')]
-for m in modules_to_remove:
-    del sys.modules[m]
-
-# 重新导入
 from config import get_session_factory, get_settings
 from database.models import Stock, DailyPrice, TechnicalIndicator
 from collectors import AKShareCollector
@@ -42,19 +28,6 @@ from analysis.risk_metrics import RiskMetrics
 def show():
     """显示股票查询页面"""
     st.title("🔍 股票查询与分析")
-    
-    # 显示当前配置（调试用）
-    with st.expander("系统信息（调试用）"):
-        settings = get_settings()
-        st.code(f"工作目录: {os.getcwd()}\nPROJECT_ROOT: {settings.PROJECT_ROOT}\nDATABASE_URL: {settings.DATABASE_URL}")
-        # 测试数据库连接
-        try:
-            db = get_session_factory()()
-            count = db.query(Stock).count()
-            st.success(f"数据库连接正常，已有 {count} 只股票")
-            db.close()
-        except Exception as e:
-            st.error(f"数据库连接失败: {e}")
     
     st.markdown("""
     输入股票代码，系统自动：
@@ -84,14 +57,14 @@ def show():
     
     with col3:
         st.markdown("<br>", unsafe_allow_html=True)
-        query_btn = st.button("🚀 查询并分析", type="primary", use_container_width=True)
+        query_btn = st.button("查询并分析", type="primary", use_container_width=True)
     
     if query_btn and stock_code:
         try:
             with st.spinner(f"正在获取 {stock_code} 数据并分析..."):
                 process_stock(stock_code, days)
         except Exception as e:
-            st.error(f"❌ 处理失败: {str(e)}")
+            st.error(f"处理失败: {str(e)}")
             import traceback
             st.code(traceback.format_exc())
 
@@ -99,7 +72,6 @@ def show():
 def process_stock(stock_code: str, days: int):
     """处理股票查询、存储和分析"""
     
-    # 确保目录存在
     settings = get_settings()
     settings.ensure_directories()
     
@@ -107,14 +79,14 @@ def process_stock(stock_code: str, days: int):
     db = SessionLocal()
     
     try:
-        # 步骤1: 检查数据库中是否已有数据
+        # 检查数据库中是否已有数据
         existing_count = db.query(DailyPrice).filter(
             DailyPrice.stock_code == stock_code
         ).count()
         
         if existing_count == 0:
-            # 步骤2: 从AKShare获取数据
-            st.info(f"📥 数据库中没有 {stock_code}，正在从AKShare获取...")
+            # 从AKShare获取数据
+            st.info(f"数据库中没有 {stock_code}，正在从AKShare获取...")
             
             collector = AKShareCollector(request_delay=0.5)
             
@@ -143,7 +115,7 @@ def process_stock(stock_code: str, days: int):
             )
             
             if df.empty:
-                st.error(f"❌ 无法获取 {stock_code} 的数据，请检查代码是否正确")
+                st.error(f"无法获取 {stock_code} 的数据，请检查代码是否正确")
                 return
             
             # 保存到数据库
@@ -157,25 +129,22 @@ def process_stock(stock_code: str, days: int):
                     low_price=float(row['low_price']) if pd.notna(row['low_price']) else None,
                     close_price=float(row['close_price']) if pd.notna(row['close_price']) else None,
                     volume=int(row['volume']) if pd.notna(row['volume']) else None,
-                    amount=float(row['amount']) if pd.notna(row.get('amount')) else None,
-                    change_pct=float(row['change_pct']) if pd.notna(row.get('change_pct')) else None,
-                    turnover_rate=float(row['turnover_rate']) if pd.notna(row.get('turnover_rate')) else None,
                 )
                 db.merge(daily_price)
                 progress_bar.progress(min((idx + 1) / len(df), 1.0))
             
             db.commit()
             progress_bar.empty()
-            st.success(f"✅ 成功导入 {len(df)} 条历史数据")
+            st.success(f"成功导入 {len(df)} 条历史数据")
             
-            # 步骤3: 计算技术指标
-            st.info("🔢 正在计算技术指标...")
+            # 计算技术指标
+            st.info("正在计算技术指标...")
             calculate_indicators_for_stock(stock_code, db)
-            st.success("✅ 技术指标计算完成")
+            st.success("技术指标计算完成")
         else:
-            st.info(f"📦 数据库中已有 {stock_code} 的 {existing_count} 条数据，直接分析")
+            st.info(f"数据库中已有 {stock_code} 的 {existing_count} 条数据，直接分析")
         
-        # 步骤4: 显示分析报告
+        # 显示分析报告
         display_analysis(stock_code, days, db)
         
     finally:
@@ -212,7 +181,7 @@ def display_analysis(stock_code: str, days: int, db):
     """显示分析报告"""
     
     st.divider()
-    st.header(f"📊 {stock_code} 分析报告")
+    st.header(f"{stock_code} 分析报告")
     
     # 获取数据
     prices = db.query(DailyPrice).filter(
@@ -241,17 +210,14 @@ def display_analysis(stock_code: str, days: int, db):
     with col1:
         st.metric(
             label="最新价",
-            value=f"¥{latest['close_price']:.3f}",
+            value=f"{latest['close_price']:.3f}",
             delta=f"{latest['change_pct']:.2f}%" if latest['change_pct'] else None
         )
     
     with col2:
         prev_close = df.iloc[-2]['close_price'] if len(df) > 1 else latest['close_price']
         change = latest['close_price'] - prev_close
-        st.metric(
-            label="涨跌额",
-            value=f"{change:+.3f}",
-        )
+        st.metric(label="涨跌额", value=f"{change:+.3f}")
     
     with col3:
         st.metric(
@@ -262,13 +228,10 @@ def display_analysis(stock_code: str, days: int, db):
     with col4:
         high_52w = df['high_price'].max()
         low_52w = df['low_price'].min()
-        st.metric(
-            label="区间高低",
-            value=f"{low_52w:.3f} - {high_52w:.3f}"
-        )
+        st.metric(label="区间高低", value=f"{low_52w:.3f} - {high_52w:.3f}")
     
     # K线图
-    st.subheader("📈 K线走势")
+    st.subheader("K线走势")
     
     fig = make_subplots(
         rows=2, cols=1,
@@ -306,9 +269,8 @@ def display_analysis(stock_code: str, days: int, db):
     st.plotly_chart(fig, use_container_width=True)
     
     # 技术指标
-    st.subheader("🔢 技术指标")
+    st.subheader("技术指标")
     
-    # 从数据库获取指标
     indicators = db.query(TechnicalIndicator).filter(
         TechnicalIndicator.stock_code == stock_code
     ).order_by(TechnicalIndicator.trade_date.desc()).first()
@@ -334,7 +296,7 @@ def display_analysis(stock_code: str, days: int, db):
             st.markdown(f"D: {indicators.d_value:.2f}" if indicators.d_value else "D: -")
     
     # 趋势分析
-    st.subheader("🎯 趋势分析")
+    st.subheader("趋势分析")
     
     try:
         analyzer = TrendAnalyzer(df)
@@ -343,8 +305,7 @@ def display_analysis(stock_code: str, days: int, db):
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            trend_color = "green" if result.direction.value == "UPTREND" else "red" if result.direction.value == "DOWNTREND" else "gray"
-            st.markdown(f"**趋势方向:** :{trend_color}[{result.direction.value}]")
+            st.markdown(f"**趋势方向:** {result.direction.value}")
         
         with col2:
             st.markdown(f"**趋势强度:** {result.strength.value}")
@@ -353,25 +314,11 @@ def display_analysis(stock_code: str, days: int, db):
             st.markdown(f"**持续天数:** {result.trend_days}天")
         
         st.info(result.description)
-        
-        # 交易信号
-        signals = analyzer.get_trading_signals()
-        if 'overall' in signals:
-            score = signals['overall']['score']
-            signal = signals['overall']['signal']
-            
-            if signal in ['strong_buy', 'buy']:
-                st.success(f"🟢 综合评分: {score}/100 - 建议买入")
-            elif signal in ['strong_sell', 'sell']:
-                st.error(f"🔴 综合评分: {score}/100 - 建议卖出")
-            else:
-                st.info(f"🟡 综合评分: {score}/100 - 观望")
-    
     except Exception as e:
         st.warning(f"趋势分析暂不可用: {e}")
     
     # 风险指标
-    st.subheader("⚠️ 风险指标")
+    st.subheader("风险指标")
     
     try:
         returns = df['close_price'].pct_change().dropna()
@@ -396,8 +343,12 @@ def display_analysis(stock_code: str, days: int, db):
     st.divider()
     csv = df.to_csv(index=False).encode('utf-8')
     st.download_button(
-        label="📥 下载数据 (CSV)",
+        label="下载数据 (CSV)",
         data=csv,
         file_name=f"{stock_code}_data.csv",
         mime="text/csv"
     )
+
+
+# 执行页面
+show()

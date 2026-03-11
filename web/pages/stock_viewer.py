@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """个股分析 - K线与技术指标"""
 import sys
 from pathlib import Path

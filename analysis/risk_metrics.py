@@ -49,7 +49,8 @@ class RiskMetrics:
             returns: 收益率序列 (日度)
             risk_free_rate: 无风险利率 (年化)
         """
-        self.returns = returns.dropna()
+        # 确保收益率为float类型（处理Decimal类型）
+        self.returns = pd.to_numeric(returns, errors='coerce').dropna()
         self.risk_free_rate = risk_free_rate / 252  # 转换为日度
         self.days = len(self.returns)
         self.annual_factor = 252

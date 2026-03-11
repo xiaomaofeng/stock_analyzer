@@ -186,7 +186,10 @@ class TrendAnalyzer:
         if len(self.df) < window:
             return [], []
         
-        recent = self.df.tail(window)
+        recent = self.df.tail(window).copy()
+        # 确保数据为float类型
+        recent['high_price'] = pd.to_numeric(recent['high_price'], errors='coerce')
+        recent['low_price'] = pd.to_numeric(recent['low_price'], errors='coerce')
         
         if method == 'pivot':
             # 基于近期高低点

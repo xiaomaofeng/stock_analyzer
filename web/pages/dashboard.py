@@ -1,4 +1,13 @@
-"""仪表盘页面 - 简化版"""
+"""仪表盘 - 数据库概览"""
+import sys
+from pathlib import Path
+import os
+
+# 设置项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+os.chdir(PROJECT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -93,3 +102,7 @@ def show():
         st.info("提示: 如果是首次使用，请先通过 🔍 股票查询 添加股票数据")
     finally:
         db.close()
+
+
+# 执行页面
+show()

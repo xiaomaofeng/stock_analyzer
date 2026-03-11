@@ -1,4 +1,13 @@
-"""回测页面"""
+"""回测页面 - 策略回测与绩效分析"""
+import sys
+from pathlib import Path
+import os
+
+# 设置项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+os.chdir(PROJECT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -387,3 +396,7 @@ def display_backtest_results(results: dict, engine):
     # 详细报告
     st.subheader("详细报告")
     st.text(engine.get_report())
+
+
+# 执行页面
+show()

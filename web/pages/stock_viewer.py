@@ -1,4 +1,13 @@
-"""个股分析页面"""
+"""个股分析 - K线与技术指标"""
+import sys
+from pathlib import Path
+import os
+
+# 设置项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+os.chdir(PROJECT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -306,3 +315,7 @@ def show_risk_metrics(df: pd.DataFrame):
             
     except Exception as e:
         st.error(f"风险指标计算失败: {e}")
+
+
+# 执行页面
+show()

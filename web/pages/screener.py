@@ -1,4 +1,13 @@
-"""股票筛选器页面"""
+"""股票筛选器 - 多条件筛选"""
+import sys
+from pathlib import Path
+import os
+
+# 设置项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+os.chdir(PROJECT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 import streamlit as st
 import pandas as pd
 from sqlalchemy import func, and_
@@ -156,3 +165,7 @@ def show():
         traceback.print_exc()
     finally:
         db.close()
+
+
+# 执行页面
+show()

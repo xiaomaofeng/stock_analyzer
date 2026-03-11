@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""回测页面"""
+"""回测页面 - 多语言版"""
 import sys
 from pathlib import Path
 import os
@@ -20,24 +20,84 @@ from processors import TechnicalCalculator
 from backtest.engine import BacktestEngine, BacktestConfig
 from backtest.strategies import MAStrategy, RSIStrategy, MACDStrategy
 
-st.set_page_config(page_title="策略回测", layout="wide")
+st.set_page_config(page_title="Backtest | 策略回测", layout="wide")
 
-st.title("🔄 策略回测")
+I18N = {
+    'zh': {
+        'title': '🔄 策略回测',
+        'params': '回测参数',
+        'stock': '股票代码',
+        'strategy': '策略',
+        'capital': '初始资金',
+        'commission': '手续费率',
+        'days': '回测时长',
+        'run': '开始回测',
+        'results': '回测结果',
+        'total_return': '总收益率',
+        'annual_return': '年化收益',
+        'max_dd': '最大回撤',
+        'sharpe': '夏普比率',
+        'trades': '交易次数',
+        'win_rate': '胜率',
+        'equity': '净值曲线',
+        'trades_record': '交易记录',
+        'date': '日期',
+        'action': '操作',
+        'price': '价格',
+        'quantity': '数量',
+        'amount': '金额',
+        'insufficient': '数据不足，请尝试其他股票',
+    },
+    'en': {
+        'title': '🔄 Strategy Backtest',
+        'params': 'Parameters',
+        'stock': 'Stock Code',
+        'strategy': 'Strategy',
+        'capital': 'Initial Capital',
+        'commission': 'Commission Rate',
+        'days': 'Backtest Period',
+        'run': 'Run Backtest',
+        'results': 'Results',
+        'total_return': 'Total Return',
+        'annual_return': 'Annual Return',
+        'max_dd': 'Max Drawdown',
+        'sharpe': 'Sharpe Ratio',
+        'trades': 'Trades',
+        'win_rate': 'Win Rate',
+        'equity': 'Equity Curve',
+        'trades_record': 'Trade Records',
+        'date': 'Date',
+        'action': 'Action',
+        'price': 'Price',
+        'quantity': 'Quantity',
+        'amount': 'Amount',
+        'insufficient': 'Insufficient data, try another stock',
+    }
+}
 
-# 侧边栏参数
+lang = st.session_state.get('lang', 'zh')
+t = lambda k: I18N[lang].get(k, k)
+
+st.title(t('title'))
+
 with st.sidebar:
-    st.header("回测参数")
-    stock_code = st.text_input("股票代码", value="159892")
-    strategy = st.selectbox("策略", ["均线交叉", "RSI超买超卖", "MACD金叉死叉"])
-    initial_capital = st.number_input("初始资金", 10000, 10000000, 100000, 10000)
-    commission = st.slider("手续费率", 0.0001, 0.005, 0.0003, 0.0001, format="%.4f")
+    st.header(t('params'))
+    stock_code = st.text_input(t('stock'), value="159892")
     
-    days = st.selectbox("回测时长", [252, 500, 1000], index=1, format_func=lambda x: f"近{x}天(~{x//252}年)")
+    strategies = ["MA Cross", "RSI", "MACD"] if lang == 'en' else ["均线交叉", "RSI超买超卖", "MACD金叉死叉"]
+    strategy = st.selectbox(t('strategy'), strategies)
     
-    run_btn = st.button("开始回测", type="primary", use_container_width=True)
+    initial_capital = st.number_input(t('capital'), 10000, 10000000, 100000, 10000)
+    commission = st.slider(t('commission'), 0.0001, 0.005, 0.0003, 0.0001, format="%.4f")
+    
+    days_options = [252, 500, 1000]
+    days_labels = [f"{x} days (~{x//252}y)" if lang == 'en' else f"近{x}天(~{x//252}年)" for x in days_options]
+    days = st.selectbox(t('days'), options=days_options, format_func=lambda x: days_labels[days_options.index(x)])
+    
+    run_btn = st.button(t('run'), type='primary', use_container_width=True)
 
 if run_btn and stock_code:
-    with st.spinner("回测中..."):
+    with st.spinner("Running backtest..." if lang == 'en' else "回测中..."):
         SessionLocal = get_session_factory()
         db = SessionLocal()
         
@@ -52,7 +112,7 @@ if run_btn and stock_code:
             ).order_by(DailyPrice.trade_date).all()
             
             if len(prices) < 60:
-                st.error("数据不足，请尝试其他股票")
+                st.error(t('insufficient'))
                 st.stop()
             
             df = pd.DataFrame([{
@@ -64,18 +124,15 @@ if run_btn and stock_code:
                 'volume': p.volume or 0,
             } for p in prices])
             
-            # 计算指标
             calc = TechnicalCalculator()
             df = calc.calculate_all(df)
             
-            # 配置回测
             config = BacktestConfig(initial_capital=initial_capital, commission_rate=commission)
             engine = BacktestEngine(config)
             
-            # 选择策略
-            if strategy == "均线交叉":
+            if strategy in ["MA Cross", "均线交叉"]:
                 strat = MAStrategy(5, 20)
-            elif strategy == "RSI超买超卖":
+            elif strategy in ["RSI", "RSI超买超卖"]:
                 strat = RSIStrategy(70, 30)
             else:
                 strat = MACDStrategy()
@@ -84,17 +141,15 @@ if run_btn and stock_code:
             engine.load_data(df)
             results = engine.run()
             
-            # 显示结果
-            st.subheader("回测结果")
+            st.subheader(t('results'))
             
             r1, r2, r3, r4 = st.columns(4)
-            r1.metric("总收益率", f"{results['total_return']*100:.2f}%")
-            r2.metric("年化收益率", f"{results['annualized_return']*100:.2f}%")
-            r3.metric("最大回撤", f"{results['max_drawdown']*100:.2f}%")
-            r4.metric("夏普比率", f"{results['sharpe_ratio']:.2f}")
+            r1.metric(t('total_return'), f"{results['total_return']*100:.2f}%")
+            r2.metric(t('annual_return'), f"{results['annualized_return']*100:.2f}%")
+            r3.metric(t('max_dd'), f"{results['max_drawdown']*100:.2f}%")
+            r4.metric(t('sharpe'), f"{results['sharpe_ratio']:.2f}")
             
-            # 净值曲线
-            st.subheader("净值曲线")
+            st.subheader(t('equity'))
             daily_values = results['daily_values']
             if daily_values:
                 fig = go.Figure()
@@ -102,16 +157,16 @@ if run_btn and stock_code:
                     x=list(range(len(daily_values))),
                     y=[v['total_value'] for v in daily_values],
                     mode='lines',
-                    name='总资产',
+                    name='Equity' if lang == 'en' else '总资产',
                     line=dict(color='#1890ff', width=2)
                 ))
-                fig.update_layout(height=400, showlegend=False, xaxis_title="交易日", yaxis_title="总资产")
+                fig.update_layout(height=400, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
             
-            # 交易记录
             if results['trades']:
-                st.subheader(f"交易记录 ({len(results['trades'])}笔)")
+                st.subheader(f"{t('trades_record')} ({len(results['trades'])})")
                 trades_df = pd.DataFrame(results['trades'][:50])
+                trades_df.columns = [t('date'), t('action'), t('price'), t('quantity'), t('amount'), 'PnL']
                 st.dataframe(trades_df, use_container_width=True)
                 
         finally:

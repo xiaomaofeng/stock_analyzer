@@ -137,7 +137,7 @@ def init_database():
     Base.metadata.create_all(bind=engine)
     
     settings = get_settings()
-    print(f"✅ 数据库初始化完成 ({settings.database_type})")
+    print(f"Database initialized: {settings.database_type}")
     return True
 
 

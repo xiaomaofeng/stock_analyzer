@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         default="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
         description="日志格式"
     )
-    LOG_PATH: Path = Field(default=None, description="日志路径")
+    LOG_PATH: str = Field(default="./logs", description="日志路径")
     
     # AKShare配置
     AKSHARE_REQUEST_DELAY: float = Field(default=0.5, description="请求间隔(秒)")
@@ -138,12 +138,13 @@ class Settings(BaseSettings):
     
     def ensure_directories(self):
         """确保所有必要目录存在"""
+        from pathlib import Path
         dirs = [
             self.get_data_dir(),
             self.get_raw_data_dir(),
             self.get_processed_data_dir(),
             self.get_cache_dir(),
-            self.LOG_PATH
+            Path(self.LOG_PATH)
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)

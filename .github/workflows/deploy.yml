@@ -1,0 +1,155 @@
+name: Auto Deploy
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:  # 支持手动触发
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy-to-server:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to server via SSH
+      uses: appleboy/ssh-action@v1.0.0
+      if: secrets.SSH_HOST != ''
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          echo "部署股票分析系统..."
+          
+          # 创建工作目录
+          mkdir -p ~/stock_db
+          cd ~/stock_db
+          
+          # 下载最新配置
+          curl -o docker-compose.prod.yml https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.prod.yml
+          curl -o .env.deploy https://raw.githubusercontent.com/${{ github.repository }}/main/.env.deploy
+          
+          # 创建环境变量文件
+          if [ ! -f .env ]; then
+            cp .env.deploy .env
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD || 'ChangeThisPassword123!' }}" >> .env
+          fi
+          
+          # 更新镜像并启动
+          docker-compose -f docker-compose.prod.yml pull
+          docker-compose -f docker-compose.prod.yml up -d
+          
+          # 等待数据初始化
+          echo "等待数据初始化..."
+          sleep 60
+          
+          # 检查状态
+          docker-compose -f docker-compose.prod.yml ps
+          
+          echo "部署完成！访问: http://$(curl -s ip.sb):8501"
+
+  deploy-to-github-pages:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create deployment info page
+      run: |
+        mkdir -p _site
+        cat > _site/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="5;url=https://github.com/${{ github.repository }}">
+            <title>股票分析系统 - 已部署</title>
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+                .success { color: #28a745; }
+                .info { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
+            </style>
+        </head>
+        <body>
+            <h1 class="success">✅ 股票分析系统已部署</h1>
+            <div class="info">
+                <h3>部署信息</h3>
+                <p><strong>仓库:</strong> ${{ github.repository }}</p>
+                <p><strong>版本:</strong> ${{ github.sha }}</p>
+                <p><strong>时间:</strong> <span id="time"></span></p>
+                
+                <h3>使用方法</h3>
+                <ol>
+                    <li>下载部署脚本: <code>deploy.sh</code> (Linux/Mac) 或 <code>deploy.ps1</code> (Windows)</li>
+                    <li>运行脚本自动部署</li>
+                    <li>访问 <code>http://localhost:8501</code> 查看分析结果</li>
+                </ol>
+                
+                <h3>Docker镜像</h3>
+                <code>docker pull ghcr.io/${{ github.repository }}:main</code>
+            </div>
+            <script>document.getElementById('time').textContent = new Date().toLocaleString();</script>
+        </body>
+        </html>
+        EOF
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./_site

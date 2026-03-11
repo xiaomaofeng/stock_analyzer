@@ -9,7 +9,7 @@
 import sys
 import argparse
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -168,8 +168,8 @@ def import_single_stock(
         log = DataUpdateLog(
             table_name='daily_prices',
             update_type='INCREMENTAL',
-            start_date=start_date,
-            end_date=end_date,
+            start_date=date.fromisoformat(start_date),
+            end_date=date.fromisoformat(end_date),
             record_count=count,
             status='SUCCESS',
             message=f'Stock: {stock_code}'

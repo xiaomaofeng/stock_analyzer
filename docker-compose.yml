@@ -1,16 +1,11 @@
-# Docker Compose配置
-# 支持多种部署方式：
-# 1. 仅SQLite: docker-compose up app
-# 2. 带PostgreSQL: docker-compose up app db
-# 3. 完整开发环境: docker-compose up
+# 简易版 Docker Compose - 适合快速体验
+# 生产环境请使用: docker-compose -f docker-compose.prod.yml up -d
 
 version: '3.8'
 
 services:
-  # 主应用服务
-  app:
+  web:
     build: .
-    container_name: stock_db_app
     ports:
       - "8501:8501"
     volumes:
@@ -18,71 +13,11 @@ services:
       - ./logs:/app/logs
       - ./.env:/app/.env
     environment:
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/stock_db.sqlite}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    depends_on:
-      - db
-    networks:
-      - stock_network
-    restart: unless-stopped
-
-  # PostgreSQL数据库服务 (可选)
-  db:
-    image: postgres:15-alpine
-    container_name: stock_db_postgres
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_USER=${DB_USER:-stock_user}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-stock_pass}
-      - POSTGRES_DB=${DB_NAME:-stock_db}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - stock_network
-    restart: unless-stopped
-    profiles:
-      - postgres
-
-  # 定时任务服务 (可选)
-  scheduler:
-    build: .
-    container_name: stock_db_scheduler
-    command: python scheduler/jobs.py
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./.env:/app/.env
-    environment:
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/stock_db.sqlite}
-    depends_on:
-      - app
-    networks:
-      - stock_network
-    restart: unless-stopped
-    profiles:
-      - scheduler
-
-  # Jupyter Notebook服务 (可选，用于分析)
-  notebook:
-    build: .
-    container_name: stock_db_notebook
-    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root
-    ports:
-      - "8888:8888"
-    volumes:
-      - ./:/app
-      - ./notebooks:/app/notebooks
-    environment:
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/stock_db.sqlite}
-    networks:
-      - stock_network
-    profiles:
-      - notebook
-
-volumes:
-  postgres_data:
-
-networks:
-  stock_network:
-    driver: bridge
+      - DATABASE_URL=sqlite:///./data/stock_db.sqlite
+    command: >
+      sh -c "
+        python scripts/init_db.py &&
+        python scripts/auto_import.py &&
+        python scripts/auto_calc_indicators.py &&
+        cd web && streamlit run app.py
+      "

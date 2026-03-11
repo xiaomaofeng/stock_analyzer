@@ -65,3 +65,13 @@ htmlcov/
 # 操作系统
 .DS_Store
 Thumbs.db
+
+# 过程文件和演示文件（不要提交）
+*_demo*
+*preview*
+QUICK_START_*.md
+start_*.bat
+start_*.ps1
+!start.bat
+!deploy.sh
+!deploy.ps1

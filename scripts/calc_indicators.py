@@ -65,10 +65,10 @@ def calculate_for_stock(db: Session, stock_code: str, force_update: bool = False
     import pandas as pd
     df = pd.DataFrame([{
         'trade_date': p.trade_date,
-        'open_price': p.open_price,
-        'high_price': p.high_price,
-        'low_price': p.low_price,
-        'close_price': p.close_price,
+        'open_price': float(p.open_price) if p.open_price else None,
+        'high_price': float(p.high_price) if p.high_price else None,
+        'low_price': float(p.low_price) if p.low_price else None,
+        'close_price': float(p.close_price) if p.close_price else None,
         'volume': p.volume,
     } for p in prices])
     

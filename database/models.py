@@ -4,6 +4,7 @@ from sqlalchemy import (
     Text, Boolean, UniqueConstraint, Index, ForeignKey
 )
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 from config.database import Base
 
@@ -34,7 +35,7 @@ class DailyPrice(Base):
     """日线行情数据表"""
     __tablename__ = "daily_prices"
     
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     stock_code = Column(String(20), ForeignKey("stocks.stock_code"), nullable=False, comment="股票代码")
     trade_date = Column(Date, nullable=False, comment="交易日期")
     
@@ -75,7 +76,7 @@ class FinancialReport(Base):
     """财务数据表"""
     __tablename__ = "financial_reports"
     
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     stock_code = Column(String(20), ForeignKey("stocks.stock_code"), nullable=False, comment="股票代码")
     report_date = Column(Date, nullable=False, comment="报告期")
     report_type = Column(String(10), comment="报告类型 (Q1/Q2/Q3/Annual)")
@@ -117,7 +118,7 @@ class TechnicalIndicator(Base):
     """技术指标表"""
     __tablename__ = "technical_indicators"
     
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     stock_code = Column(String(20), ForeignKey("stocks.stock_code"), nullable=False, comment="股票代码")
     trade_date = Column(Date, nullable=False, comment="交易日期")
     
@@ -168,7 +169,7 @@ class IndexPrice(Base):
     """市场指数数据表"""
     __tablename__ = "index_prices"
     
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     index_code = Column(String(20), nullable=False, comment="指数代码")
     index_name = Column(String(50), comment="指数名称")
     trade_date = Column(Date, nullable=False, comment="交易日期")
@@ -194,7 +195,7 @@ class AttributionResult(Base):
     """归因分析结果表"""
     __tablename__ = "attribution_results"
     
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     stock_code = Column(String(20), nullable=False, comment="股票代码")
     analysis_date = Column(Date, nullable=False, comment="分析日期")
     analysis_period = Column(String(20), comment="分析周期 (1M/3M/6M/1Y)")
@@ -228,7 +229,7 @@ class TradeRecord(Base):
     """交易记录表"""
     __tablename__ = "trade_records"
     
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     strategy_name = Column(String(50), comment="策略名称")
     stock_code = Column(String(20), nullable=False, comment="股票代码")
     trade_date = Column(DateTime, nullable=False, comment="交易时间")
@@ -252,7 +253,7 @@ class DataUpdateLog(Base):
     """数据更新日志表"""
     __tablename__ = "data_update_log"
     
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     table_name = Column(String(50), comment="表名")
     update_type = Column(String(20), comment="更新类型 (FULL/INCREMENTAL)")
     start_date = Column(Date, comment="数据起始日期")

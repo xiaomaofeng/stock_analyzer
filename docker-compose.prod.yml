@@ -1,0 +1,136 @@
+# 生产环境自动化部署配置
+# 一键启动: docker-compose -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: stock_db_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-stock_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-stock_pass_123}
+      POSTGRES_DB: ${DB_NAME:-stock_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-stock_user} -d ${DB_NAME:-stock_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stock_network
+
+  # 数据初始化服务 - 自动导入159892等股票
+  data-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock_db_init
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-stock_user}:${DB_PASSWORD:-stock_pass_123}@postgres:5432/${DB_NAME:-stock_db}
+      - AKSHARE_REQUEST_DELAY=1.0
+      - INIT_STOCKS=159892,000001,000333,600519
+    volumes:
+      - ./scripts:/app/scripts
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo '等待数据库就绪...' &&
+        sleep 5 &&
+        echo '初始化数据库表...' &&
+        python scripts/init_db.py &&
+        echo '导入股票数据...' &&
+        python scripts/auto_import.py &&
+        echo '计算技术指标...' &&
+        python scripts/auto_calc_indicators.py &&
+        echo '数据初始化完成!'
+      "
+    networks:
+      - stock_network
+    restart: "no"
+
+  # Web应用
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock_db_web
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-stock_user}:${DB_PASSWORD:-stock_pass_123}@postgres:5432/${DB_NAME:-stock_db}
+      - LOG_LEVEL=INFO
+    ports:
+      - "${WEB_PORT:-8501}:8501"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    command: >
+      sh -c "
+        echo '启动Web服务...' &&
+        cd web &&
+        streamlit run app.py --server.address=0.0.0.0 --server.port=8501
+      "
+    networks:
+      - stock_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 定时更新服务
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock_db_scheduler
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-stock_user}:${DB_PASSWORD:-stock_pass_123}@postgres:5432/${DB_NAME:-stock_db}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - web
+    command: >
+      sh -c "
+        echo '启动定时更新服务...' &&
+        python scheduler/jobs.py
+      "
+    networks:
+      - stock_network
+
+  # Nginx反向代理（可选，用于域名访问）
+  nginx:
+    image: nginx:alpine
+    container_name: stock_db_nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+    networks:
+      - stock_network
+    profiles:
+      - nginx
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  stock_network:
+    driver: bridge

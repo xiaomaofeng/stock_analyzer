@@ -12,27 +12,24 @@ class MAStrategy:
         self.short_period = short_period
         self.long_period = long_period
         self.name = f"MA{short_period}_{long_period}"
-        self.current_idx = 0
+        self.data_history = []  # 存储历史数据
     
     def __call__(self, day_data: pd.DataFrame, portfolio) -> List[Order]:
         """使策略可调用"""
-        self.current_idx += 1
-        return self.on_data(day_data, self.current_idx, portfolio)
-    
-    def on_data(self, df: pd.DataFrame, current_idx: int, portfolio) -> List[Order]:
-        """
-        根据数据生成交易信号
+        # 添加当前数据到历史
+        if not day_data.empty:
+            self.data_history.append(day_data.iloc[0])
         
-        Args:
-            df: 历史数据DataFrame
-            current_idx: 当前索引
-            portfolio: 当前持仓
-            
-        Returns:
-            订单列表
-        """
-        if current_idx < self.long_period:
+        return self.on_data(portfolio)
+    
+    def on_data(self, portfolio) -> List[Order]:
+        """根据历史数据生成交易信号"""
+        if len(self.data_history) < self.long_period + 1:
             return []
+        
+        # 构建DataFrame
+        df = pd.DataFrame(self.data_history)
+        current_idx = len(df) - 1
         
         orders = []
         

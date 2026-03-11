@@ -116,6 +116,7 @@ if run_btn and stock_code:
                 st.stop()
             
             df = pd.DataFrame([{
+                'stock_code': stock_code,
                 'trade_date': p.trade_date,
                 'open_price': float(p.open_price) if p.open_price else 0,
                 'high_price': float(p.high_price) if p.high_price else 0,

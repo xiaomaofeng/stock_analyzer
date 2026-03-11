@@ -1,40 +1,44 @@
-# ============ 核心依赖 ============
-# 数据库
+# ============ Core Dependencies ============
+# Database
 sqlalchemy>=2.0.0
 alembic>=1.12.0
 
-# 数据处理
+# Data Processing
 pandas>=2.0.0
 numpy>=1.24.0
 
-# 数据采集
+# Data Collection
 akshare>=1.12.0
 
-# 技术指标计算
+# Technical Analysis
 ta-lib>=0.4.28
 
-# ============ 桌面应用 ============
+# Web Framework (for Web version)
+streamlit>=1.28.0
+plotly>=5.18.0
+
+# Desktop Framework (for Desktop version)
 PySide6>=6.5.0
 pyqtgraph>=0.13.0
 
-# ============ 分析 ============
+# Analysis
 scipy>=1.10.0
 scikit-learn>=1.3.0
 
-# ============ 工具 ============
+# Utils
 python-dotenv>=1.0.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 loguru>=0.7.0
 tenacity>=8.2.0
 
-# ============ 打包 ============
+# Packaging
 pyinstaller>=6.0.0
 
-# ============ 测试 ============
+# Testing
 pytest>=7.4.0
 
-# ============ Jupyter分析 ============
+# Jupyter
 jupyter>=1.0.0
 matplotlib>=3.8.0
 seaborn>=0.13.0

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""股票查询页面 - 多语言版"""
+"""股票查询页面 - 多语言版 + 指标学习"""
 import sys
 from pathlib import Path
 import os
@@ -25,6 +25,7 @@ from analysis.risk_metrics import RiskMetrics
 
 st.set_page_config(page_title="Stock Query | 股票查询", layout="wide")
 
+# 多语言配置
 I18N = {
     'zh': {
         'title': '🔍 股票查询与分析',
@@ -59,6 +60,9 @@ I18N = {
         'ma': '均线',
         'macd': 'MACD',
         'rsi_kdj': 'RSI/KDJ',
+        'learn_indicators': '📚 指标学习',
+        'select_indicator': '选择指标学习',
+        'hide': '不显示',
     },
     'en': {
         'title': '🔍 Stock Query & Analysis',
@@ -93,12 +97,332 @@ I18N = {
         'ma': 'Moving Average',
         'macd': 'MACD',
         'rsi_kdj': 'RSI/KDJ',
+        'learn_indicators': '📚 Indicator Guide',
+        'select_indicator': 'Select indicator to learn',
+        'hide': 'Hide',
+    }
+}
+
+# 指标学习内容
+LEARN_CONTENT = {
+    'zh': {
+        '均线系统': """
+        ### 📈 均线系统 (Moving Average)
+        
+        **什么是均线？**
+        均线是某段时间内收盘价的平均值，用于平滑价格波动，显示趋势方向。
+        
+        **常用均线：**
+        - **MA5** (5日均线): 短期趋势，反映近期价格动向
+        - **MA20** (20日均线): 中期趋势，月线级别
+        - **MA60** (60日均线): 长期趋势，季线级别
+        
+        **使用技巧：**
+        - 🟢 **多头排列**: MA5 > MA20 > MA60，上升趋势，买入信号
+        - 🔴 **空头排列**: MA5 < MA20 < MA60，下降趋势，卖出信号
+        - 🟡 **金叉**: 短期均线上穿长期均线，买入信号
+        - 🟡 **死叉**: 短期均线下穿长期均线，卖出信号
+        
+        **注意事项：**
+        - 均线滞后于价格，适合判断趋势而非捕捉拐点
+        - 震荡行情中均线频繁交叉，容易发出假信号
+        """,
+        'MACD': """
+        ### 📊 MACD (指数平滑异同平均线)
+        
+        **构成要素：**
+        - **DIF线** (快线): 12日EMA - 26日EMA
+        - **DEA线** (慢线): DIF的9日EMA
+        - **MACD柱** (BAR): (DIF - DEA) × 2
+        
+        **核心用法：**
+        
+        **1. 金叉死叉信号**
+        - 🟢 **MACD金叉**: DIF上穿DEA，买入信号
+        - 🔴 **MACD死叉**: DIF下穿DEA，卖出信号
+        
+        **2. 背离信号（更可靠）**
+        - 🟢 **底背离**: 价格创新低，MACD未创新低，强烈买入信号
+        - 🔴 **顶背离**: 价格创新高，MACD未创新高，强烈卖出信号
+        
+        **3. 零轴判断**
+        - 零轴上方: 多头市场
+        - 零轴下方: 空头市场
+        
+        **实战技巧：**
+        - 零轴附近金叉更可靠
+        - MACD柱状线缩小时，趋势可能反转
+        - 结合成交量确认信号强度
+        """,
+        'RSI/KDJ': """
+        ### 🌡️ RSI (相对强弱指标)
+        
+        **RSI是什么？**
+        RSI衡量价格上涨和下跌的相对强度，取值范围0-100。
+        
+        **关键阈值：**
+        - **RSI > 80**: 超买区域，可能回调
+        - **RSI < 20**: 超卖区域，可能反弹
+        - **RSI 50**: 多空分界线
+        
+        **使用技巧：**
+        - RSI在50以上，强势市场，逢低买入
+        - RSI在50以下，弱势市场，逢高卖出
+        - 背离信号比超买超卖更可靠
+        
+        ---
+        
+        ### 🎲 KDJ (随机指标)
+        
+        **构成要素：**
+        - **K线** (快线): 反映最新价格位置
+        - **D线** (慢线): K线的平滑，信号线
+        - **J线**: 3K - 2D，敏感度最高
+        
+        **关键阈值：**
+        - **K,D > 80**: 超买，考虑卖出
+        - **K,D < 20**: 超卖，考虑买入
+        
+        **核心用法：**
+        - 🟢 **金叉**: K上穿D，买入信号（20以下更可靠）
+        - 🔴 **死叉**: K下穿D，卖出信号（80以上更可靠）
+        
+        **注意事项：**
+        - KDJ在极端行情会钝化（长期超买/超卖）
+        - 适合震荡行情，趋势行情容易失效
+        - 结合MACD使用效果更好
+        """,
+        '布林带': """
+        ### 🎯 布林带 (Bollinger Bands)
+        
+        **构成要素：**
+        - **中轨** (MID): 20日均线
+        - **上轨** (UPPER): 中轨 + 2倍标准差
+        - **下轨** (LOWER): 中轨 - 2倍标准差
+        
+        **核心原理：**
+        价格大多数时间在布林带内运行（约95%概率）
+        
+        **使用技巧：**
+        
+        **1. 轨道突破**
+        - 🟢 突破上轨: 强势，但可能回调
+        - 🔴 跌破下轨: 弱势，但可能反弹
+        
+        **2. 轨道收窄/扩张**
+        - 收口（收窄）: 即将变盘，大行情要来
+        - 开口（扩张）: 趋势延续，顺势操作
+        
+        **3. 中轨作用**
+        - 上升趋势: 中轨是支撑位
+        - 下降趋势: 中轨是阻力位
+        
+        **实战口诀：**
+        - "三轨向上，看多做多"
+        - "三轨向下，看空做空"
+        - "收口观望，开口跟进"
+        """,
+        '成交量': """
+        ### 📊 成交量 (Volume)
+        
+        **为什么重要？**
+        成交量是价格变动的"能量"，验证趋势真实性。
+        
+        **量价关系法则：**
+        
+        **1. 量价同步（健康）**
+        - 🟢 **价涨量增**: 上涨有支撑，趋势延续
+        - 🔴 **价跌量缩**: 抛压减轻，可能见底
+        
+        **2. 量价背离（警惕）**
+        - 🟡 **价涨量缩**: 上涨无力，可能见顶
+        - 🟡 **价跌量增**: 恐慌抛售，可能加速下跌
+        
+        **特殊形态：**
+        - **天量**: 成交量突然放大2倍以上，关键转折点
+        - **地量**: 成交量极度萎缩，变盘前兆
+        
+        **使用技巧：**
+        - 突破关键位置必须放量才有效
+        - 盘整期放量突破，跟进买入
+        - 上涨末期放天量，考虑离场
+        """,
+        '风险指标': """
+        ### ⚠️ 风险指标解读
+        
+        **收益指标：**
+        - **年化收益率**: 投资一年获得的收益率
+        - **总收益率**: 整个持有期的累计收益
+        
+        **风险指标：**
+        - **年化波动率**: 收益率的标准差，衡量价格波动大小
+          - < 15%: 低波动，稳健
+          - 15%-30%: 中等波动
+          - > 30%: 高波动，高风险
+        
+        - **最大回撤**: 从高点到低点的最大亏损幅度
+          - < 10%: 优秀
+          - 10%-20%: 良好
+          - > 30%: 风险较高
+        
+        **风险调整收益：**
+        - **夏普比率**: 每承担一单位风险获得的超额收益
+          - > 2.0: 优秀
+          - 1.0-2.0: 良好
+          - < 1.0: 一般
+          - < 0: 不如存银行
+        
+        - **索提诺比率**: 只考虑下行风险的夏普比率
+        - **卡尔玛比率**: 年化收益/最大回撤，越高越好
+        
+        **尾部风险：**
+        - **VaR (风险价值)**: 95%置信度下的最大亏损
+        - **CVaR**: 超过VaR时的平均亏损
+        - **偏度**: 收益分布不对称性
+        - **峰度**: 极端收益的概率
+        """
+    },
+    'en': {
+        'MA': """
+        ### 📈 Moving Average (MA)
+        
+        **What is MA?**
+        Moving Average is the average price over a specific period, used to smooth price fluctuations.
+        
+        **Common MAs:**
+        - **MA5**: Short-term trend (5 days)
+        - **MA20**: Medium-term trend (20 days)
+        - **MA60**: Long-term trend (60 days)
+        
+        **Signals:**
+        - 🟢 **Golden Cross**: Short MA crosses above Long MA (Buy)
+        - 🔴 **Death Cross**: Short MA crosses below Long MA (Sell)
+        - 🟢 **Bullish**: MA5 > MA20 > MA60 (Uptrend)
+        - 🔴 **Bearish**: MA5 < MA20 < MA60 (Downtrend)
+        """,
+        'MACD': """
+        ### 📊 MACD (Moving Average Convergence Divergence)
+        
+        **Components:**
+        - **DIF**: 12-day EMA - 26-day EMA
+        - **DEA**: 9-day EMA of DIF
+        - **MACD Bar**: (DIF - DEA) × 2
+        
+        **Signals:**
+        - 🟢 **Golden Cross**: DIF crosses above DEA (Buy)
+        - 🔴 **Death Cross**: DIF crosses below DEA (Sell)
+        - 🟢 **Bullish Divergence**: Price makes lower low, MACD makes higher low
+        - 🔴 **Bearish Divergence**: Price makes higher high, MACD makes lower high
+        """,
+        'RSI/KDJ': """
+        ### 🌡️ RSI (Relative Strength Index)
+        
+        **RSI Levels:**
+        - **> 80**: Overbought (Possible sell)
+        - **< 20**: Oversold (Possible buy)
+        - **50**: Neutral
+        
+        ### 🎲 KDJ (Stochastic Oscillator)
+        
+        **Levels:**
+        - **> 80**: Overbought
+        - **< 20**: Oversold
+        
+        **Signals:**
+        - 🟢 **Golden Cross**: K crosses above D (Buy)
+        - 🔴 **Death Cross**: K crosses below D (Sell)
+        """,
+        'Bollinger': """
+        ### 🎯 Bollinger Bands
+        
+        **Components:**
+        - **Middle Band**: 20-day MA
+        - **Upper Band**: Middle + 2×StdDev
+        - **Lower Band**: Middle - 2×StdDev
+        
+        **Usage:**
+        - Price touches Upper: Overbought
+        - Price touches Lower: Oversold
+        - Bands squeeze: Volatility expansion coming
+        """,
+        'Volume': """
+        ### 📊 Volume Analysis
+        
+        **Price-Volume Relationship:**
+        - 🟢 **Rising price + Rising volume**: Healthy uptrend
+        - 🔴 **Falling price + Falling volume**: Selling pressure easing
+        - 🟡 **Rising price + Falling volume**: Weak rally (Caution)
+        - 🟡 **Falling price + Rising volume**: Panic selling
+        """,
+        'Risk': """
+        ### ⚠️ Risk Metrics
+        
+        **Return:**
+        - **Annualized Return**: Return over one year
+        
+        **Risk:**
+        - **Volatility**: Standard deviation of returns
+          - < 15%: Low risk
+          - 15-30%: Medium risk
+          - > 30%: High risk
+        
+        - **Max Drawdown**: Peak to trough decline
+          - < 10%: Excellent
+          - 10-20%: Good
+          - > 30%: High risk
+        
+        **Risk-Adjusted:**
+        - **Sharpe Ratio**: Return per unit of risk
+          - > 2.0: Excellent
+          - 1.0-2.0: Good
+          - < 1.0: Poor
+        """
     }
 }
 
 lang = st.session_state.get('lang', 'zh')
 t = lambda k: I18N[lang].get(k, k)
 
+# ===== 侧边栏：指标学习 =====
+with st.sidebar:
+    st.header(t('learn_indicators'))
+    
+    guide_options = {
+        'zh': ['不显示', '均线系统', 'MACD', 'RSI/KDJ', '布林带', '成交量', '风险指标'],
+        'en': ['Hide', 'MA', 'MACD', 'RSI/KDJ', 'Bollinger', 'Volume', 'Risk']
+    }
+    
+    indicator_guide = st.selectbox(
+        t('select_indicator'),
+        options=guide_options[lang]
+    )
+    
+    if indicator_guide != t('hide'):
+        # 映射选择到内容键
+        content_map = {
+            'zh': {
+                '均线系统': '均线系统',
+                'MACD': 'MACD',
+                'RSI/KDJ': 'RSI/KDJ',
+                '布林带': '布林带',
+                '成交量': '成交量',
+                '风险指标': '风险指标'
+            },
+            'en': {
+                'MA': 'MA',
+                'MACD': 'MACD',
+                'RSI/KDJ': 'RSI/KDJ',
+                'Bollinger': 'Bollinger',
+                'Volume': 'Volume',
+                'Risk': 'Risk'
+            }
+        }
+        
+        content_key = content_map[lang].get(indicator_guide, indicator_guide)
+        if content_key in LEARN_CONTENT[lang]:
+            st.markdown(LEARN_CONTENT[lang][content_key])
+
+# ===== 主界面 =====
 st.title(t('title'))
 st.markdown(t('desc'))
 

@@ -1,4 +1,5 @@
-"""趋势分析模块"""
+# -*- coding: utf-8 -*-
+"""趋势分析模块 - 完整版"""
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
@@ -35,7 +36,7 @@ class TrendResult:
 
 
 class TrendAnalyzer:
-    """趋势分析器"""
+    """趋势分析器 - 使用完整ADX计算"""
     
     def __init__(self, df: pd.DataFrame):
         """
@@ -65,8 +66,8 @@ class TrendAnalyzer:
         self.df['ma_short'] = self.df['close_price'].rolling(window=short_period, min_periods=1).mean()
         self.df['ma_long'] = self.df['close_price'].rolling(window=long_period, min_periods=1).mean()
         
-        # 计算ADX
-        adx = self._calculate_adx()
+        # 计算ADX (完整版)
+        adx = self._calculate_adx_full()
         
         # 判断趋势方向
         direction = self._detect_trend_direction(short_period, long_period)
@@ -129,31 +130,16 @@ class TrendAnalyzer:
         else:
             return TrendStrength.UNKNOWN
     
-    def _calculate_adx(self, period: int = 14) -> float:
+    def _calculate_adx_full(self, period: int = 14) -> float:
         """
-        计算ADX (Average Directional Index)
+        计算完整ADX (Average Directional Index)
         
-        ADX用于衡量趋势强度，不考虑趋势方向
+        使用Wilder's Smoothing方法计算
         """
         if len(self.df) < period + 1:
             return 0.0
         
         df = self.df.copy()
-        
-        # 计算 +DM 和 -DM
-        df['+dm'] = df['high_price'].diff()
-        df['-dm'] = -df['low_price'].diff()
-        
-        df['+dm'] = np.where(
-            (df['+dm'] > df['-dm']) & (df['+dm'] > 0),
-            df['+dm'],
-            0
-        )
-        df['-dm'] = np.where(
-            (df['-dm'] > df['+dm']) & (df['-dm'] > 0),
-            df['-dm'],
-            0
-        )
         
         # 计算真实波幅 TR
         df['tr1'] = df['high_price'] - df['low_price']
@@ -161,13 +147,35 @@ class TrendAnalyzer:
         df['tr3'] = (df['low_price'] - df['close_price'].shift(1)).abs()
         df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
         
-        # 计算平滑平均值
-        df['+di'] = 100 * df['+dm'].rolling(window=period).mean() / df['tr'].rolling(window=period).mean()
-        df['-di'] = 100 * df['-dm'].rolling(window=period).mean() / df['tr'].rolling(window=period).mean()
+        # 计算 +DM 和 -DM (Directional Movement)
+        df['high_diff'] = df['high_price'].diff()
+        df['low_diff'] = -df['low_price'].diff()
         
-        # 计算DX和ADX
+        df['+dm'] = np.where(
+            (df['high_diff'] > df['low_diff']) & (df['high_diff'] > 0),
+            df['high_diff'],
+            0
+        )
+        df['-dm'] = np.where(
+            (df['low_diff'] > df['high_diff']) & (df['low_diff'] > 0),
+            df['low_diff'],
+            0
+        )
+        
+        # 使用Wilder's Smoothing (类似于EMA，alpha = 1/period)
+        df['tr_smooth'] = df['tr'].ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+        df['+dm_smooth'] = df['+dm'].ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+        df['-dm_smooth'] = df['-dm'].ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+        
+        # 计算 +DI 和 -DI
+        df['+di'] = 100 * df['+dm_smooth'] / df['tr_smooth']
+        df['-di'] = 100 * df['-dm_smooth'] / df['tr_smooth']
+        
+        # 计算DX (Directional Index)
         df['dx'] = 100 * (df['+di'] - df['-di']).abs() / (df['+di'] + df['-di'])
-        df['adx'] = df['dx'].rolling(window=period).mean()
+        
+        # 计算ADX (DX的平滑)
+        df['adx'] = df['dx'].ewm(alpha=1/period, min_periods=period, adjust=False).mean()
         
         return df['adx'].iloc[-1] if not pd.isna(df['adx'].iloc[-1]) else 0.0
     
